@@ -351,7 +351,6 @@ class WebotsEnv(gym.Env):
                 _thread.exit()
             rospy.loginfo("got to point: {} out of {}".format(idx, len(path) ))
             if self.is_reseting:
-                robot.stop_robot()
                 _thread.exit()
         robot.stop_robot()
 
