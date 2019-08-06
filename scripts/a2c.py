@@ -93,12 +93,12 @@ class A2CAgent:
                         np.empty((batch_sz,) + env.observation_space[1].shape)]
         # training loop: collect samples, send to optimizer, repeat updates times
         ep_rews = [0.0]
-        next_obs = env.reset()
+        next_obs = env.get_observation()
         best_losses = float('inf')
         for update in range(updates):
             # next_obs, rewards[0], dones[0], _ = env.step(6)
             # continue
-            env.env.start_simulation()
+            env.resume_simulator()
             for step in range(batch_sz):
                 observations[0][step] = next_obs[0].copy()
                 observations[1][step] = next_obs[1].copy()
@@ -108,12 +108,14 @@ class A2CAgent:
                 ep_rews[-1] += rewards[step]
                 if dones[step]:
                     ep_rews.append(0.0)
+                    print("before reset")
                     next_obs = env.reset()
+                    env.resume_simulator()
                     logging.info("Episode: %03d, Reward: %03d" % (len(ep_rews) - 1, ep_rews[-2]))
                     print("Episode: %d, Reward: %f" % (len(ep_rews) - 1, ep_rews[-2]))
                 # print (step, actions[step])
 
-            env.env.pause_simulation()
+            env.pause()
             _, next_value = self.model.action_value(next_obs[0][None, :], next_obs[1][None, :])
             returns, advs = self._returns_advantages(rewards, dones, values, next_value)
             # a trick to input actions and advantages through same API
@@ -123,10 +125,10 @@ class A2CAgent:
 
             losses = self.model.train_on_batch((observations[0], observations[1]), [acts_and_advs, returns])
             if losses[0] < best_losses:
-                model.save_weights("/local_home/weights/"+str(update)+" best loses")
+                model.save_weights("weights/bestloses")
                 best_losses = losses[0]
-            elif update % 10 == 0:
-                model.save_weights("/local_home/weights/"+str(update))
+            elif update % 100 == 0:
+                model.save_weights("weights/"+str(update))
             print (rewards, dones, losses)
             logging.debug("[%d/%d] Losses: %s" % (update + 1, updates, losses))
         return ep_rews
@@ -174,8 +176,7 @@ class A2CAgent:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='input weight file of the network')
-    parser.add_argument('--weight', default="/local_home/weights/82", type=str, help='weight file')
-
+    parser.add_argument('--weight', default="weights/bestloses", type=str, help='weight file')
 
     args = parser.parse_args()
     logging.getLogger().setLevel(logging.INFO)
