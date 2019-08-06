@@ -55,17 +55,18 @@ class Service:
 
     def call(self, value):
         error_counter = 0
-        while (error_counter<30):
+        while (error_counter<6):
             try:
                 return_msg = self.srv.call(value)
                 # rospy.loginfo(self.str + ' called')
                 break
             except Exception as e:
-                rospy.logerr_throttle(1, e)
+                rospy.logerr_throttle(1, self.str)
+                print(e)
                 time.sleep(0.1)
                 error_counter += 1
-        if error_counter >= 30:
-            raise Exception('Unsolvable error in service call {}'.format(value))
+        if error_counter >= 6:
+            raise Exception('Unsolvable error in service call {}'.format(self.str))
         return return_msg
 
 
@@ -134,6 +135,8 @@ class Supervisor:
                 self.init_services()
                 not_pass = False
             except Exception as e:
+                self.services['reset'].call(True)
+                time.sleep(3)
                 rospy.logerr("reset not happen try it again Error: {}".format(e))
 
 class Robot():
@@ -162,6 +165,7 @@ class Robot():
         self.imu_sub = rospy.Subscriber(self.robot_service_str+'/inertial_unit/roll_pitch_yaw', Imu, self.imu_cb)
         self.laser_sub = rospy.Subscriber(self.robot_service_str+'/Sick_LMS_291/laser_scan/layer0', LaserScan, self.laser_cb)
         self.is_pause = False
+        self.reset = False
 
     def pause(self):
         self.is_pause = True
@@ -214,6 +218,7 @@ class Robot():
         while not distance < 1.5:
             if self.is_pause:
                 return
+
             angle = math.atan2(pos[1] - self.pos[1], pos[0] - self.pos[0])
             distance = math.hypot(pos[0] - self.pos[0], pos[1] - self.pos[1])
             diff_angle = (angle -self.orientation + math.pi) % (math.pi*2) - math.pi
@@ -232,6 +237,8 @@ class Robot():
                 left_vel = left_vel * self.max_speed / check_speed
                 right_vel = right_vel * self.max_speed / check_speed
 
+            if self.reset:
+                raise Exception('want to got to pos when already restarted')
             for wheel in self.wheels_left:
                 self.services[wheel+"_vel"].call(left_vel)
             for wheel in self.wheels_right:
@@ -306,6 +313,7 @@ class Robot():
         self.imu_sub.unregister()
         self.pos_sub.unregister()
         self.laser_sub.unregister()
+        self.reset = True
 
 
 class WebotsEnv(gym.Env):
@@ -338,9 +346,10 @@ class WebotsEnv(gym.Env):
             try:
                 robot.go_to_pos(point)
             except Exception as e:
-                rospy.logerr(e)
-                return
-            rospy.loginfo("got to point: {} out of {}".format(idx, len(path)))
+                print(e)
+                rospy.logwarn("path follower {}".format(self.is_reseting))
+                _thread.exit()
+            rospy.loginfo("got to point: {} out of {}".format(idx, len(path) ))
             if self.is_reseting:
                 robot.stop_robot()
                 _thread.exit()
