@@ -342,6 +342,7 @@ class WebotsEnv(gym.Env):
             time.sleep(0.1)
             rospy.loginfo_throttle(1, "path follower waiting for reset to be false")
         with self.lock:
+            rospy.loginfo("path follower got the lock")
             path = self.path[idx_start:]
             for idx, point in enumerate(path):
                 while self.is_pause:
@@ -351,11 +352,12 @@ class WebotsEnv(gym.Env):
                 except Exception as e:
                     print(e)
                     rospy.logwarn("path follower {}".format(self.is_reseting))
-                    _thread.exit()
+                    break
                 rospy.loginfo("got to point: {} out of {}".format(idx, len(path) ))
                 if self.is_reseting:
                     robot.stop_robot()
                     break
+        rospy.loginfo("path follower release the lock")
         # robot.stop_robot()
 
     def get_laser_scan(self):
