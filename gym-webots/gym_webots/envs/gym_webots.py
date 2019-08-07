@@ -316,7 +316,6 @@ class Robot():
         self.imu_sub.unregister()
         self.pos_sub.unregister()
         self.laser_sub.unregister()
-        self.reset = True
 
 
 class WebotsEnv(gym.Env):
@@ -486,6 +485,8 @@ class WebotsEnv(gym.Env):
 
     def reset(self):
         self.is_reseting = True
+        self.robot.reset = True
+        self.person.reset = True
         rospy.loginfo("trying to get the lock")
         with self.lock:
             rospy.loginfo("got the lock")
