@@ -75,8 +75,8 @@ class A2CAgent:
         # hyperparameters for loss terms, gamma is the discount coefficient
         self.params = {
             'gamma': 0.99,
-            'value': 0.01,
-            'entropy': 0.0001
+            'value': 0.25,
+            'entropy': 0.01
         }
         self.model = model
         self.model.compile(

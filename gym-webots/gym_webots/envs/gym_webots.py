@@ -261,7 +261,6 @@ class Robot():
 
     def laser_cb(self, laser_msg):
         if self.reset:
-            self.laser_sub.unregister()
             return
         angle_increments = np.arange(float(laser_msg.angle_min) - float(laser_msg.angle_min) , float(laser_msg.angle_max) - 0.001 - float(laser_msg.angle_min), float(laser_msg.angle_increment))
         ranges = np.asarray(laser_msg.ranges, dtype=float)
