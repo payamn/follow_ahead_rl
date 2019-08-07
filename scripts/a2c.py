@@ -75,12 +75,12 @@ class A2CAgent:
         # hyperparameters for loss terms, gamma is the discount coefficient
         self.params = {
             'gamma': 0.99,
-            'value': 0.5,
+            'value': 0.01,
             'entropy': 0.0001
         }
         self.model = model
         self.model.compile(
-            optimizer=ko.RMSprop(lr=0.0007),
+            optimizer=ko.RMSprop(lr=0.0004),
             # define separate losses for policy logits and value estimate
             loss=[self._logits_loss, self._value_loss]
         )
@@ -110,6 +110,7 @@ class A2CAgent:
                     ep_rews.append(0.0)
                     print("before reset")
                     next_obs = env.reset()
+                    print("reset done")
                     env.resume_simulator()
                     logging.info("Episode: %03d, Reward: %03d" % (len(ep_rews) - 1, ep_rews[-2]))
                     print("Episode: %d, Reward: %f" % (len(ep_rews) - 1, ep_rews[-2]))

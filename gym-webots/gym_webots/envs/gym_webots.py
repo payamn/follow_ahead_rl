@@ -221,7 +221,7 @@ class Robot():
 
             angle = math.atan2(pos[1] - self.pos[1], pos[0] - self.pos[0])
             distance = math.hypot(pos[0] - self.pos[0], pos[1] - self.pos[1])
-            diff_angle = (angle -self.orientation + math.pi) % (math.pi*2) - math.pi
+            diff_angle = (angle - self.orientation + math.pi) % (math.pi*2) - math.pi
             # if abs(diff_angle_prev - diff_angle) > math.pi*3/:
             #     diff_angle = diff_angle_prev
             # else:
@@ -238,7 +238,7 @@ class Robot():
                 right_vel = right_vel * self.max_speed / check_speed
 
             if self.reset:
-                raise Exception('want to got to pos when already restarted')
+                return
             for wheel in self.wheels_left:
                 self.services[wheel+"_vel"].call(left_vel)
             for wheel in self.wheels_right:
@@ -260,6 +260,9 @@ class Robot():
         return np.expand_dims(self.scan_image, axis=2)
 
     def laser_cb(self, laser_msg):
+        if self.reset:
+            self.laser_sub.unregister()
+            return
         angle_increments = np.arange(float(laser_msg.angle_min) - float(laser_msg.angle_min) , float(laser_msg.angle_max) - 0.001 - float(laser_msg.angle_min), float(laser_msg.angle_increment))
         ranges = np.asarray(laser_msg.ranges, dtype=float)
         remove_index = np.append(np.argwhere(ranges >= self.max_laser_range), np.argwhere(ranges <= laser_msg.range_min))
@@ -338,21 +341,22 @@ class WebotsEnv(gym.Env):
         while self.is_reseting:
             time.sleep(0.1)
             rospy.loginfo_throttle(1, "path follower waiting for reset to be false")
-
-        path = self.path[idx_start:]
-        for idx, point in enumerate(path):
-            while self.is_pause:
-                time.sleep(0.1)
-            try:
-                robot.go_to_pos(point)
-            except Exception as e:
-                print(e)
-                rospy.logwarn("path follower {}".format(self.is_reseting))
-                _thread.exit()
-            rospy.loginfo("got to point: {} out of {}".format(idx, len(path) ))
-            if self.is_reseting:
-                _thread.exit()
-        robot.stop_robot()
+        with self.lock:
+            path = self.path[idx_start:]
+            for idx, point in enumerate(path):
+                while self.is_pause:
+                    time.sleep(0.1)
+                try:
+                    robot.go_to_pos(point)
+                except Exception as e:
+                    print(e)
+                    rospy.logwarn("path follower {}".format(self.is_reseting))
+                    _thread.exit()
+                rospy.loginfo("got to point: {} out of {}".format(idx, len(path) ))
+                if self.is_reseting:
+                    robot.stop_robot()
+                    break
+        # robot.stop_robot()
 
     def get_laser_scan(self):
         return self.robot.get_laser_image()
@@ -387,17 +391,19 @@ class WebotsEnv(gym.Env):
                 self.path = pickle.load(f)
         except Exception as e:
             print(e)
-        self.init_simulator()
+        self.is_reseting = True
+        self.lock = _thread.allocate_lock()
+        with self.lock:
+            self.init_simulator()
 
     def init_simulator(self):
-        self.is_reseting = True
         self.is_pause = True
         idx_start = random.randint(0, len(self.path)-20)
         init_pos_person = self.path[idx_start]
         angle_person = self.calculate_angle_using_path(idx_start)
-        angle_robot = self.calculate_angle_using_path(idx_start+5)
+        angle_robot = self.calculate_angle_using_path(idx_start+3)
+        self.robot = Robot('my_robot', init_pos=self.path[idx_start+3],  angle=angle_robot, supervisor=self.supervisor)
         self.person = Robot('person', init_pos=self.path[idx_start],  max_speed=4, angle=angle_person, supervisor=self.supervisor)
-        self.robot = Robot('my_robot', init_pos=self.path[idx_start+5],  angle=angle_robot, supervisor=self.supervisor)
         self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start,))
         # while True:
         #     print(self.get_angle_person_robot())
@@ -439,7 +445,7 @@ class WebotsEnv(gym.Env):
             episode_over = True
             print('collision happened episode over')
             reward -= 1
-        elif distance > 4:
+        elif distance > 5:
             episode_over = True
             print('max distance happened episode over')
         elif self.number_of_steps > self.max_numb_steps:
@@ -468,7 +474,7 @@ class WebotsEnv(gym.Env):
         elif self.min_distance < distance < self.max_distance:
             reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
         elif distance < self.min_distance:
-            reward -= 1.0/distance
+            reward -= 1 - distance / self.min_distance
         else:
             reward -= distance / 7.0
         reward = min(max(reward, -1), 1)
@@ -477,9 +483,13 @@ class WebotsEnv(gym.Env):
         return reward
 
     def reset(self):
-        self.robot.__del__()
-        self.person.__del__()
-        self.init_simulator()
+        self.is_reseting = True
+        rospy.loginfo("trying to get the lock")
+        with self.lock:
+            rospy.loginfo("got the lock")
+            self.robot.__del__()
+            self.person.__del__()
+            self.init_simulator()
         """ Repeats NO-OP action until a new episode begins. """
 
         return self.get_observation()
