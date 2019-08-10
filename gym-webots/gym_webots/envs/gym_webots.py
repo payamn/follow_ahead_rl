@@ -326,10 +326,12 @@ class Robot():
             self.services[wheel + "_vel"].call(0)
     def __del__(self):
         rospy.loginfo("removing robot:" + self.name)
-        self.imu_sub.unregister()
-        self.pos_sub.unregister()
-        self.laser_sub.unregister()
-
+        try:
+            self.imu_sub.unregister()
+            self.pos_sub.unregister()
+            self.laser_sub.unregister()
+        except Exception as e:
+            rospy.logerr(e)
 
 class WebotsEnv(gym.Env):
 
