@@ -151,10 +151,10 @@ class Robot():
         self.wheels_right = ['back_right_wheel', 'front_right_wheel']
         self.services = {}
         self.max_speed = max_speed
-        self.max_laser_range = 25.0 # meter
+        self.max_laser_range = 5.0 # meter
         self.width_laser_image = 100
         self.height_laser_image = 50
-        self.pos = (0, 0)
+        self.pos = (None, None)
         self.init_services()
         self.angular_pid = PID(0.45, 0, 0.74, setpoint=0)
         self.linear_pid = PID(4, 0, 0.05, setpoint=0)
@@ -166,7 +166,12 @@ class Robot():
         self.laser_sub = rospy.Subscriber(self.robot_service_str+'/Sick_LMS_291/laser_scan/layer0', LaserScan, self.laser_cb)
         self.is_pause = False
         self.reset = False
+        self.velocity_window = 3
+        self.velocity_history = np.zeros((self.velocity_window))
+        self.last_velocity_idx = 0
 
+    def get_velocity(self):
+        return np.mean(self.velocity_history)
     def pause(self):
         self.is_pause = True
 
@@ -212,15 +217,16 @@ class Robot():
             self.services[wheel + "_vel"].call(0)
 
     def go_to_pos(self, pos):
-        angle = math.atan2(pos[1]-self.pos[1], pos[0]-self.pos[0])
-        distance = math.hypot(pos[0]-self.pos[0], pos[1]-self.pos[1])
+        current_pos = self.get_pos()
+        angle = math.atan2(pos[1]-current_pos[1], pos[0]-current_pos[0])
+        distance = math.hypot(pos[0]-current_pos[0], pos[1]-current_pos[1])
         # diff_angle_prev = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
         while not distance < 1.5:
             if self.is_pause:
                 return
 
-            angle = math.atan2(pos[1] - self.pos[1], pos[0] - self.pos[0])
-            distance = math.hypot(pos[0] - self.pos[0], pos[1] - self.pos[1])
+            angle = math.atan2(pos[1] - current_pos[1], pos[0] - current_pos[0])
+            distance = math.hypot(pos[0] - current_pos[0], pos[1] - current_pos[1])
             diff_angle = (angle - self.orientation + math.pi) % (math.pi*2) - math.pi
             # if abs(diff_angle_prev - diff_angle) > math.pi*3/:
             #     diff_angle = diff_angle_prev
@@ -248,7 +254,10 @@ class Robot():
             time.sleep(0.1)
 
     def get_pos(self):
-        return self.pos
+        while self.pos[0] is None:
+            rospy.logwarn("waiting for pos to be available")
+            time.sleep(0.1)
+        return self.pos[:2]
 
     def imu_cb(self, imo_msg):
         self.orientation = quat2euler(
@@ -267,7 +276,7 @@ class Robot():
         remove_index = np.append(np.argwhere(ranges >= self.max_laser_range), np.argwhere(ranges <= laser_msg.range_min))
         angle_increments = np.delete(angle_increments, remove_index)
         ranges = np.delete(ranges, remove_index)
-        min_ranges = np.min(ranges)
+        min_ranges = float("inf")  if len(ranges)==0  else np.min(ranges)
         if min_ranges < self.collision_distance:
             self.is_collided = True
             rospy.loginfo_throttle(1, "robot collided:")
@@ -284,8 +293,13 @@ class Robot():
         #     cv.waitKey(1)
 
     def position_cb(self, pos_msg):
-        self.pos = (-pos_msg.longitude, -pos_msg.latitude)
-        # rospy.loginfo_throttle(0.2, "current pos: {}, orientation {}".format(self.pos, self.orientation))
+        prev_pos = self.pos
+        self.pos = (-pos_msg.longitude, -pos_msg.latitude, pos_msg.header.stamp.to_sec())
+
+        # calculate velocity
+        if prev_pos[0] is not None:
+            self.velocity_history[self.last_velocity_idx] = math.hypot(self.pos[1]-prev_pos[1], self.pos[0]-prev_pos[0]) / (self.pos[2]-prev_pos[2])
+            self.last_velocity_idx = (self.last_velocity_idx + 1) % self.velocity_window
 
     def init_services(self):
         self.services = {}
@@ -332,8 +346,20 @@ class WebotsEnv(gym.Env):
     def calculate_angle_using_path(self, idx):
         return math.atan2(self.path[idx+1][1] - self.path[idx][1], self.path[idx+1][0] - self.path[idx][0])
 
-    def get_person_position_relative_robot(self):
-        return np.asarray(self.person.pos) - np.asarray(self.robot.pos)
+    def get_person_position_heading_relative_robot(self):
+        person_pos = self.person.get_pos()
+        robot_pos = self.robot.get_pos()
+        person_pos_heading = np.asarray([person_pos[0]+ math.cos(self.person.orientation), person_pos[1] + math.sin(self.person.orientation)])
+        person_poses = [person_pos, person_pos_heading]
+        person_poses_transformed = [ np.asarray(pos) - np.asarray(robot_pos) for pos in person_poses]
+        angle_robot = math.pi/2 - self.robot.orientation
+        rotation_matrix = np.asarray([[math.cos(angle_robot), -math.sin(angle_robot)], [math.sin(angle_robot), math.cos(angle_robot)]])
+        person_poses_rt = [np.dot(rotation_matrix, matrix) for matrix in person_poses_transformed]
+
+        heading_person = np.asarray(math.atan2(person_poses_rt[1][1]-person_poses_rt[0][1],person_poses_rt[1][0]-person_poses_rt[0][0]))
+        # rospy.loginfo ( "angle {}, person_pos {}".format(np.rad2deg(heading_person), person_poses_rt[0]))
+        # time.sleep(0.5)
+        return person_poses_rt[0], heading_person
 
     def path_follower(self, robot, idx_start):
         while self.is_reseting:
@@ -364,7 +390,7 @@ class WebotsEnv(gym.Env):
     def get_angle_person_robot(self):
         orientation_person = self.person.orientation
         angle_robot = self.robot.orientation
-        robot_person_vec = -self.get_person_position_relative_robot()
+        robot_person_vec = -self.get_person_position_heading_relative_robot()[0]
         if orientation_person is None:
             return
         heading_person_vec = np.asarray([math.cos(orientation_person), math.sin(orientation_person)])
@@ -373,12 +399,11 @@ class WebotsEnv(gym.Env):
         return angle * 180 / math.pi
 
     def get_observation(self):
-        orientation_person = np.asarray(self.person.orientation)
-        orientation_robot = np.asarray(self.robot.orientation)
-        orientation = np.append(orientation_person, orientation_robot)
-        orientation_position = np.append(orientation, self.get_person_position_relative_robot())
+        position, heading = self.get_person_position_heading_relative_robot()
+        orientation_position = np.append(position, heading)
+        velocities = np.asarray([self.person.get_velocity(), self.robot.get_velocity()])
 
-        return self.get_laser_scan(), orientation_position
+        return self.get_laser_scan(), np.append(orientation_position, velocities)
 
     def __init__(self):
         self.node = rospy.init_node("webots_env", anonymous=True)
@@ -401,8 +426,11 @@ class WebotsEnv(gym.Env):
         idx_start = random.randint(0, len(self.path)-20)
         init_pos_person = self.path[idx_start]
         angle_person = self.calculate_angle_using_path(idx_start)
-        angle_robot = self.calculate_angle_using_path(idx_start+3)
-        self.robot = Robot('my_robot', init_pos=self.path[idx_start+3],  angle=angle_robot, supervisor=self.supervisor)
+        idx_robot = idx_start + 1
+        while (math.hypot (self.path[idx_robot][1] - self.path[idx_start][1], self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
+            idx_robot += 1
+        angle_robot = self.calculate_angle_using_path(idx_robot)
+        self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, supervisor=self.supervisor)
         self.person = Robot('person', init_pos=self.path[idx_start],  max_speed=4, angle=angle_person, supervisor=self.supervisor)
         self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start,))
         # while True:
@@ -412,7 +440,7 @@ class WebotsEnv(gym.Env):
         self.observation_space = gym.spaces.Tuple(
                 (
                     gym.spaces.Box(low=0, high=1, shape=(50, 100)),
-                    gym.spaces.Box(low=0, high=1, shape=(4,))
+                    gym.spaces.Box(low=0, high=1, shape=(5,))
                 )
             )
         # Action space omits the Tackle/Catch actions, which are useful
@@ -439,7 +467,7 @@ class WebotsEnv(gym.Env):
         reward = self.get_reward()
         ob = self.get_observation()
         episode_over = False
-        rel_person = self.get_person_position_relative_robot()
+        rel_person = self.get_person_position_heading_relative_robot()[0]
         distance = math.hypot(rel_person[0], rel_person[1])
         if self.is_collided():
             episode_over = True
@@ -452,17 +480,18 @@ class WebotsEnv(gym.Env):
             episode_over = True
             print('max number of steps episode over')
 
+        rospy.loginfo("reward: {} obs: {}".format(reward, ob[1]))
         return ob, reward, episode_over, {}
 
     def is_collided(self):
-        rel_person = self.get_person_position_relative_robot()
+        rel_person = self.get_person_position_heading_relative_robot()[0]
         distance = math.hypot(rel_person[0], rel_person[1])
         if distance < 0.5 or self.robot.is_collided:
             return True
         return False
 
     def get_reward(self):
-        pos_rel = self.get_person_position_relative_robot()
+        pos_rel = self.get_person_position_heading_relative_robot()[0]
         reward = 0
         distance = math.hypot(pos_rel[0], pos_rel[1])
         angle_robot_person = self.get_angle_person_robot()
@@ -479,7 +508,6 @@ class WebotsEnv(gym.Env):
             reward -= distance / 7.0
         reward = min(max(reward, -1), 1)
         # ToDO check for obstacle
-        print("reward", reward)
         return reward
 
     def reset(self):
