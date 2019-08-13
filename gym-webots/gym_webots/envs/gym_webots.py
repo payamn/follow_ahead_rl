@@ -155,7 +155,11 @@ class Robot():
         self.width_laser_image = 100
         self.height_laser_image = 50
         self.pos = (None, None)
-        self.init_services()
+        try:
+            self.init_services()
+        except Exception as e:
+            rospy.logerr(e)
+            return
         self.angular_pid = PID(0.45, 0, 0.74, setpoint=0)
         self.linear_pid = PID(4, 0, 0.05, setpoint=0)
         self.orientation = angle
@@ -334,7 +338,7 @@ class Robot():
             rospy.logerr(e)
 
 class WebotsEnv(gym.Env):
-
+    
     def pause(self):
         self.is_pause = True
         self.person.pause()
