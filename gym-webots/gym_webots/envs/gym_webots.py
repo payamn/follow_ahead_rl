@@ -80,8 +80,7 @@ class Supervisor:
     def get_create_robot_str(self, name, model, translation, rotation):
         robot_str = 'DEF ' + name + ' ' + model + ' { translation ' + translation + ' rotation ' + rotation + \
                                         ' controller "ros" \
-                                        controllerArgs "--name=' + name + '" extensionSlot [ Camera { translation 0 0.17 -0.22\
-                                        width 256 height 128 motionBlur 500 noise 0.02}\
+                                        controllerArgs "--name=' + name + '" extensionSlot [\
                                         Accelerometer { lookupTable [ -39.24 -39.24 0.005 39.24 39.24 0.005 ]}\
                                         Gyro {lookupTable [-50 -50 0.005 50 50 0.005 ]}\
                                         SickLms291 {translation 0 0.23 -0.136 noise 0.1}\
@@ -228,7 +227,7 @@ class Robot():
         while not distance < 1.5:
             if self.is_pause:
                 return
-
+            current_pos = self.get_pos()
             angle = math.atan2(pos[1] - current_pos[1], pos[0] - current_pos[0])
             distance = math.hypot(pos[0] - current_pos[0], pos[1] - current_pos[1])
             diff_angle = (angle - self.orientation + math.pi) % (math.pi*2) - math.pi
@@ -258,9 +257,14 @@ class Robot():
             time.sleep(0.1)
 
     def get_pos(self):
+        counter_problem = 0
         while self.pos[0] is None:
             rospy.logwarn("waiting for pos to be available")
             time.sleep(0.1)
+            counter_problem += 1
+            if counter_problem > 300:
+                raise Exception('Probable shared memory issue happend')
+
         return self.pos[:2]
 
     def imu_cb(self, imo_msg):
@@ -338,7 +342,7 @@ class Robot():
             rospy.logerr(e)
 
 class WebotsEnv(gym.Env):
-    
+
     def pause(self):
         self.is_pause = True
         self.person.pause()
@@ -353,6 +357,19 @@ class WebotsEnv(gym.Env):
         return math.atan2(self.path[idx+1][1] - self.path[idx][1], self.path[idx+1][0] - self.path[idx][0])
 
     def get_person_position_heading_relative_robot(self):
+        got_position = False
+        while (not got_position):
+
+            try:
+                person_pos = self.person.get_pos()
+                robot_pos = self.robot.get_pos()
+                got_position = True
+            except Exception as e:
+                rospy.logerr(e)
+                rospy.loginfo("resseting because of exception (in get_person_position heading rel..)")
+                self.reset()
+                time.sleep(3)
+
         person_pos = self.person.get_pos()
         robot_pos = self.robot.get_pos()
         person_pos_heading = np.asarray([person_pos[0]+ math.cos(self.person.orientation), person_pos[1] + math.sin(self.person.orientation)])
@@ -373,8 +390,9 @@ class WebotsEnv(gym.Env):
             rospy.loginfo_throttle(1, "path follower waiting for reset to be false")
         with self.lock:
             rospy.loginfo("path follower got the lock")
-            path = self.path[idx_start:]
-            for idx, point in enumerate(path):
+            for idx in range (idx_start, len(self.path)):
+                point = self.path[idx]
+                self.current_path_idx = idx
                 while self.is_pause:
                     time.sleep(0.1)
                 try:
@@ -383,7 +401,7 @@ class WebotsEnv(gym.Env):
                     print(e)
                     rospy.logwarn("path follower {}".format(self.is_reseting))
                     break
-                rospy.loginfo("got to point: {} out of {}".format(idx, len(path) ))
+                rospy.loginfo("got to point: {} out of {}".format(idx - idx_start, len(self.path) - idx_start ))
                 if self.is_reseting:
                     robot.stop_robot()
                     break
@@ -413,7 +431,8 @@ class WebotsEnv(gym.Env):
 
     def __init__(self):
         self.node = rospy.init_node("webots_env", anonymous=True)
-
+        # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
+        self.use_goal = True
         self.supervisor = Supervisor()
         # read the path for robot
         self.path = []
@@ -478,42 +497,66 @@ class WebotsEnv(gym.Env):
         if self.is_collided():
             episode_over = True
             print('collision happened episode over')
-            reward -= 1
+            reward -= 0.5
         elif distance > 5:
             episode_over = True
             print('max distance happened episode over')
         elif self.number_of_steps > self.max_numb_steps:
             episode_over = True
             print('max number of steps episode over')
-
+        reward = min(max(reward, -1), 1)
         rospy.loginfo("reward: {} obs: {}".format(reward, ob[1]))
         return ob, reward, episode_over, {}
 
     def is_collided(self):
         rel_person = self.get_person_position_heading_relative_robot()[0]
         distance = math.hypot(rel_person[0], rel_person[1])
-        if distance < 0.5 or self.robot.is_collided:
+        if distance < 0.8 or self.robot.is_collided:
             return True
         return False
 
     def get_reward(self):
-        pos_rel = self.get_person_position_heading_relative_robot()[0]
         reward = 0
-        distance = math.hypot(pos_rel[0], pos_rel[1])
-        angle_robot_person = self.get_angle_person_robot()
-        # Negative reward for being behind the person
-        if self.is_collided():
-            reward -= 1
-        if not 90 > angle_robot_person > 0:
-            reward -= distance/6.0
-        elif self.min_distance < distance < self.max_distance:
-            reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
-        elif distance < self.min_distance:
-            reward -= 1 - distance / self.min_distance
+        if self.use_goal:
+            point_goal = self.path[self.current_path_idx + 1]
+            pos_robot = self.robot.get_pos()
+            distance_goal = math.hypot(pos_robot[1] - point_goal[1], pos_robot[0] - point_goal[0])
+            # reward = max (-distance_goal/3.0, -0.9) + 0.4 # between -0.5,0.4
+            robot_pos_heading = np.asarray(
+                    [pos_robot[0] + math.cos(self.robot.orientation), pos_robot[1] + math.sin(self.robot.orientation)])
+            p12 = math.hypot(pos_robot[1]-robot_pos_heading[1], pos_robot[0]-robot_pos_heading[0])
+            p13 = math.hypot(point_goal[1]-pos_robot[1], point_goal[0]-pos_robot[0])
+            p23 = math.hypot(robot_pos_heading[1]-point_goal[1], robot_pos_heading[0]-point_goal[0])
+
+            math.acos((p12*p12+ p13*p13- p23*p23) / (2 * p12 * p13))
+            angle_robot_goal = np.rad2deg(math.acos((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13)))
+            reward += ((60 - angle_robot_goal)/120.0)/2 +0.25 # between -0.25,0.5
+            pos_rel = self.get_person_position_heading_relative_robot()[0]
+            distance = math.hypot(pos_rel[0], pos_rel[1])
+
+            if distance < 1.5:
+                reward -= (1.5-distance)/2.0
+            elif distance > 2.5:
+                reward -= (distance-2.5)/2.0
+            else: # distance between 1.5 to 2.5
+                reward += 0.5 - abs(distance-2)/2.0 # between 0.25-0.5
         else:
-            reward -= distance / 7.0
-        reward = min(max(reward, -1), 1)
-        # ToDO check for obstacle
+            pos_rel = self.get_person_position_heading_relative_robot()[0]
+            distance = math.hypot(pos_rel[0], pos_rel[1])
+            angle_robot_person = self.get_angle_person_robot()
+            # Negative reward for being behind the person
+            if self.is_collided():
+                reward -= 1
+            if not 90 > angle_robot_person > 0:
+                reward -= distance/6.0
+            elif self.min_distance < distance < self.max_distance:
+                reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
+            elif distance < self.min_distance:
+                reward -= 1 - distance / self.min_distance
+            else:
+                reward -= distance / 7.0
+            reward = min(max(reward, -1), 1)
+            # ToDO check for obstacle
         return reward
 
     def reset(self):
