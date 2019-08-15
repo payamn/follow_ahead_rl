@@ -221,14 +221,11 @@ class Robot():
             self.services[wheel + "_vel"].call(0)
 
     def go_to_pos(self, pos):
-        current_pos = self.get_pos()
-        angle = math.atan2(pos[1]-current_pos[1], pos[0]-current_pos[0])
-        distance = math.hypot(pos[0]-current_pos[0], pos[1]-current_pos[1])
-        # diff_angle_prev = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
+        distance = 3
         while not distance < 1.5:
             if self.is_pause:
                 return
-
+            current_pos = self.get_pos()
             angle = math.atan2(pos[1] - current_pos[1], pos[0] - current_pos[0])
             distance = math.hypot(pos[0] - current_pos[0], pos[1] - current_pos[1])
             diff_angle = (angle - self.orientation + math.pi) % (math.pi*2) - math.pi
@@ -258,9 +255,13 @@ class Robot():
             time.sleep(0.1)
 
     def get_pos(self):
+        counter_problem = 0
         while self.pos[0] is None:
             rospy.logwarn("waiting for pos to be available")
+            counter_problem += 1
             time.sleep(0.1)
+            if counter_problem > 300:
+              raise Exception('Probable shared memory issue happend')
         return self.pos[:2]
 
     def imu_cb(self, imo_msg):
@@ -337,8 +338,7 @@ class Robot():
         except Exception as e:
             rospy.logerr(e)
 
-class WebotsEnv(gym.Env):
-    
+class WebotsEnv(gym.Env): 
     def pause(self):
         self.is_pause = True
         self.person.pause()
@@ -353,8 +353,18 @@ class WebotsEnv(gym.Env):
         return math.atan2(self.path[idx+1][1] - self.path[idx][1], self.path[idx+1][0] - self.path[idx][0])
 
     def get_person_position_heading_relative_robot(self):
-        person_pos = self.person.get_pos()
-        robot_pos = self.robot.get_pos()
+        got_position = False
+        while (not got_position):
+          try:
+            person_pos = self.person.get_pos()
+            robot_pos = self.robot.get_pos()
+            got_position = True
+          except Exception as e:
+            rospy.logerr(e)
+            rospy.loginfo("resseting because of exception (in get_person_position heading rel..)")
+            self.reset()
+            time.sleep(3)
+
         person_pos_heading = np.asarray([person_pos[0]+ math.cos(self.person.orientation), person_pos[1] + math.sin(self.person.orientation)])
         person_poses = [person_pos, person_pos_heading]
         person_poses_transformed = [ np.asarray(pos) - np.asarray(robot_pos) for pos in person_poses]
