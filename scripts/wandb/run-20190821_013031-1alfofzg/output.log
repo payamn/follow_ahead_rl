@@ -1,0 +1,23 @@
+finished epoc 0 avg_loss_train: 0.19883093610405922 avg_loss_validation 0.6602748036384583
+saving loss validation: 0.6602748036384583
+saving loss train: 0.19883093610405922
+finished epoc 1 avg_loss_train: 0.20848289132118225 avg_loss_validation 1.027834415435791
+finished epoc 2 avg_loss_train: 0.22397670708596706 avg_loss_validation 0.8594654202461243
+finished epoc 3 avg_loss_train: 0.25037138909101486 avg_loss_validation 0.7740798592567444
+finished epoc 4 avg_loss_train: 0.23312795907258987 avg_loss_validation 1.1160945494969685
+finished epoc 5 avg_loss_train: 0.2323565110564232 avg_loss_validation 0.8432756265004476
+finished epoc 6 avg_loss_train: 0.22658912651240826 avg_loss_validation 1.2513344287872314
+finished epoc 7 avg_loss_train: 0.25536131858825684 avg_loss_validation 0.8134112159411112
+finished epoc 8 avg_loss_train: 0.22813444957137108 avg_loss_validation 0.9630370736122131
+finished epoc 9 avg_loss_train: 0.22703259252011776 avg_loss_validation 0.9918176929155985
+finished epoc 10 avg_loss_train: 0.21919927187263966 avg_loss_validation 1.04691215356191
+finished epoc 11 avg_loss_train: 0.21938533522188663 avg_loss_validation 1.06821076075236
+finished epoc 12 avg_loss_train: 0.24131672643125057 avg_loss_validation 0.9730947216351827
+finished epoc 13 avg_loss_train: 0.22640141658484936 avg_loss_validation 0.9363803267478943
+finished epoc 14 avg_loss_train: 0.1976056694984436 avg_loss_validation 0.8352258006731669
+saving loss train: 0.1976056694984436
+finished epoc 15 avg_loss_train: 0.21297035925090313 avg_loss_validation 1.0172500411669414
+finished epoc 16 avg_loss_train: 0.2135529052466154 avg_loss_validation 0.9004367788632711
+finished epoc 17 avg_loss_train: 0.1961320135742426 avg_loss_validation 0.9559791882832845
+saving loss train: 0.1961320135742426
+finished epoc 18 avg_loss_train: 0.20370777882635593 avg_loss_validation 0.8689674735069275

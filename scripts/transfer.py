@@ -10,6 +10,8 @@ from torch.utils.data import DataLoader
 
 from dataset import Follow_Ahead_Dataset
 
+import wandb
+
 import os
 
 import torchvision
@@ -57,14 +59,17 @@ class FollowAhead():
     def train(self, net):
         optimizer = torch.optim.Adadelta(net.parameters())
         loss_func = nn.MSELoss()
-        if os.path.exists('data/best_loss'):
-            net.load_state_dict(torch.load('data/best_loss'))
+        if os.path.exists('data/best_loss_validation'):
+            net.load_state_dict(torch.load('data/best_loss_validation'))
         else:
-            print("path not exist: {}".format("data/best_loss'"))
+            print("path not exist: {}".format("data/best_loss_validation"))
         train_dataset = Follow_Ahead_Dataset("data/dataset/0/")
+        validation_dataset = Follow_Ahead_Dataset("data/dataset/1/")
         train_loader = DataLoader(train_dataset, batch_size=626, shuffle=True)
+        validation_loader = DataLoader(validation_dataset, batch_size=626, shuffle=True)
+        best_loss_validation = float('inf')
         best_loss = float('inf')
-        for epoc in range (10000):
+        for epoc in range (1000000):
             avg_loss_epoc = 0
             optimizer.zero_grad()
             for image_batch, pv_batch, target in train_loader:
@@ -78,9 +83,27 @@ class FollowAhead():
                 optimizer.step()
                 avg_loss_epoc += loss.item()
             avg_loss_epoc = avg_loss_epoc / len(train_loader)
-            print("finished epoc {} avg_loss: {}".format(epoc, avg_loss_epoc))
+            avg_loss_validation = 0
+            with torch.no_grad():
+                for image_batch, pv_batch, target in validation_loader:
+                    image_batch = Variable(torch.from_numpy(np.asarray(image_batch))).float().cuda()
+                    pv_batch = Variable(torch.from_numpy(np.asarray(pv_batch))).float().cuda()
+                    target = Variable(torch.from_numpy(np.asarray(target))).float().cuda()
+                    predictions = net(image_batch, pv_batch)
+                    loss = loss_func(predictions, target)
+                    # print ("loss is: {}".format(loss.item()))
+                    avg_loss_validation += loss.item()
+            avg_loss_validation = avg_loss_validation/ len(validation_loader)
+            print("finished epoc {} avg_loss_train: {} avg_loss_validation {}".format(epoc, avg_loss_epoc, avg_loss_validation))
+            if epoc % 20:
+                wandb.log({"Train Loss": avg_loss_epoc, "Validation Loss":avg_loss_validation})
+
+            if best_loss_validation >avg_loss_validation:
+                print("saving loss validation: {}".format(avg_loss_validation))
+                best_loss_validation = avg_loss_validation
+                torch.save(net.state_dict(), 'data/best_loss_validation')
             if best_loss >avg_loss_epoc:
-                print("saving loss is {}".format(avg_loss_epoc))
+                print("saving loss train: {}".format(avg_loss_epoc))
                 best_loss = avg_loss_epoc
                 torch.save(net.state_dict(), 'data/best_loss')
             # for file_idx in range (37):
@@ -108,6 +131,8 @@ class FollowAhead():
             # torch.save(net.state_dict(), 'data/best_loss')
 net = Net().cuda()
 print(net)
+wandb.init(project="followahead")
+wandb.watch(net)
 
 follow_ahead = FollowAhead()
 follow_ahead.train(net)

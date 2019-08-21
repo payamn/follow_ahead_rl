@@ -1,4 +1,6 @@
 .idea/*
+**/wandb/*
 *.pyc
 *.swp
 **/weights/*
+**/dataset/*

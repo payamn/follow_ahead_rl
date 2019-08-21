@@ -31,23 +31,29 @@ def read_data():
                     pickle.dump(p, f)
 
 if __name__ == '__main__':
-    read_data()
-    exit(0)
+    # read_data()
+    # exit(0)
     data = []
-    pkl_counter = 0
+    pkl_counter = 2874
     env = gym.make('webots-v0')
     env.set_robot_to_auto()
     env.resume_simulator()
+    prev_obs = env.get_observation()
+    time.sleep(1)
+    prev_goal, prev_angle = env.get_goal_person()
     while(True):
 
         next_obs = env.get_observation()
         pos_goal, angle_distance = env.get_goal_person()
-        data.append((next_obs, np.asarray(angle_distance)))
-        if len(data) > 100:
-            with open('data/dataset/{}.pkl'.format(pkl_counter), 'wb') as f:
-                pickle.dump(data, f)
-                data = []
-                print ("saving {}.pkl".format(pkl_counter))
-                pkl_counter+=1
+        if pos_goal is None or angle_distance is None or (prev_angle == angle_distance and prev_goal == pos_goal) :
+            continue
+        data = (next_obs, np.asarray(angle_distance))
+        with open('data/dataset/0/{}.pkl'.format(pkl_counter), 'wb') as f:
+            pickle.dump(data, f)
+            data = []
+            print ("saving {}.pkl".format(pkl_counter))
+            pkl_counter+=1
+        prev_obs = next_obs
+        prev_goal, prev_angle = (pos_goal, angle_distance)
 
         time.sleep(0.05)

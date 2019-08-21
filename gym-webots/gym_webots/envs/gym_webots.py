@@ -159,7 +159,7 @@ class Robot():
         except Exception as e:
             rospy.logerr(e)
             return
-        self.angular_pid = PID(0.45, 0, 0.74, setpoint=0)
+        self.angular_pid = PID(0.75, 0, 0.01, setpoint=0)
         self.linear_pid = PID(4, 0, 0.05, setpoint=0)
         self.orientation = angle
         self.scan_image = None
@@ -547,7 +547,7 @@ class WebotsEnv(gym.Env):
         for idx in range(self.current_path_idx + 1, len(self.path) - 3):
             if math.hypot(pos_person[0]-self.path[idx][0], pos_person[1]-self.path[idx][1]) > 3:
                 pos_goal = self.path[idx]
-                angle_distance= self.person.angle_distance_to_point(pos_goal)
+                angle_distance= self.robot.angle_distance_to_point(pos_goal)
                 break
         return pos_goal, angle_distance
 
