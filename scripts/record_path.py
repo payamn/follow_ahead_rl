@@ -9,7 +9,7 @@ from sensor_msgs.msg import NavSatFix
 import subprocess
 import pickle
 
-robot_service_str = '/pioneer3at/'
+robot_service_str = '/my_robot/'
 all_pos = []
 def position_cb(pos_msg):
     pos = (-pos_msg.longitude, -pos_msg.latitude)

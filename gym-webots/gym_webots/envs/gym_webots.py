@@ -219,18 +219,20 @@ class Robot():
         for wheel in self.wheels_right:
             self.services[wheel + "_vel"].call(0)
 
-    def go_to_pos(self, pos):
+    def angle_distance_to_point(self, pos):
         current_pos = self.get_pos()
-        angle = math.atan2(pos[1]-current_pos[1], pos[0]-current_pos[0])
-        distance = math.hypot(pos[0]-current_pos[0], pos[1]-current_pos[1])
+        angle = math.atan2(pos[1] - current_pos[1], pos[0] - current_pos[0])
+        distance = math.hypot(pos[0] - current_pos[0], pos[1] - current_pos[1])
+        angle = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
+        return angle, distance
+
+    def go_to_pos(self, pos, stop_after_getting=False):
+        distance = 2
         # diff_angle_prev = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
         while not distance < 1.5:
             if self.is_pause:
                 return
-            current_pos = self.get_pos()
-            angle = math.atan2(pos[1] - current_pos[1], pos[0] - current_pos[0])
-            distance = math.hypot(pos[0] - current_pos[0], pos[1] - current_pos[1])
-            diff_angle = (angle - self.orientation + math.pi) % (math.pi*2) - math.pi
+            diff_angle, distance = self.angle_distance_to_point(pos)
             # if abs(diff_angle_prev - diff_angle) > math.pi*3/:
             #     diff_angle = diff_angle_prev
             # else:
@@ -255,6 +257,8 @@ class Robot():
             # rospy.loginfo("angle: {} distance: {} vel: angular: {} linear: {} left: {} right: {} diff: {} orientation: {}"\
             #     .format(np.rad2deg(angle), distance, angular_vel, linear_vel, left_vel, right_vel, np.rad2deg(diff_angle), np.rad2deg(self.orientation)))
             time.sleep(0.1)
+        if stop_after_getting:
+            self.stop_robot()
 
     def get_pos(self):
         counter_problem = 0
@@ -384,26 +388,44 @@ class WebotsEnv(gym.Env):
         # time.sleep(0.5)
         return person_poses_rt[0], heading_person
 
-    def path_follower(self, robot, idx_start):
+    def set_robot_to_auto(self):
+        self.robot_mode = 1
+
+    """
+    the function will check the self.robot_mode:
+        0: will not move robot
+        1: robot will try to go to a point after person
+    """
+    def path_follower(self, person, idx_start, robot):
         while self.is_reseting:
             time.sleep(0.1)
             rospy.loginfo_throttle(1, "path follower waiting for reset to be false")
         with self.lock:
             rospy.loginfo("path follower got the lock")
-            for idx in range (idx_start, len(self.path)):
+            for idx in range (idx_start, len(self.path)-3):
                 point = self.path[idx]
                 self.current_path_idx = idx
                 while self.is_pause:
                     time.sleep(0.1)
                 try:
-                    robot.go_to_pos(point)
+                    person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True,))
+                    person_thread.start()
+                    # person.go_to_pos(point)
+                    if self.robot_mode == 1:
+                        noisy_point = (self.path[idx+3][0] +min(max(np.random.normal(),-0.5),0.5), self.path[idx+3][1] +min(max(np.random.normal(),-0.5),0.5))
+                        robot_thread = threading.Thread(target=self.robot.go_to_pos, args=(noisy_point,True,))
+                        robot_thread.start()
+                        robot_thread.join()
+
+                    person_thread.join()
+
                 except Exception as e:
                     print(e)
                     rospy.logwarn("path follower {}".format(self.is_reseting))
                     break
                 rospy.loginfo("got to point: {} out of {}".format(idx - idx_start, len(self.path) - idx_start ))
                 if self.is_reseting:
-                    robot.stop_robot()
+                    person.stop_robot()
                     break
         rospy.loginfo("path follower release the lock")
         # robot.stop_robot()
@@ -443,6 +465,8 @@ class WebotsEnv(gym.Env):
             print(e)
         self.is_reseting = True
         self.lock = _thread.allocate_lock()
+        self.robot_mode = 0
+
         with self.lock:
             self.init_simulator()
 
@@ -457,7 +481,8 @@ class WebotsEnv(gym.Env):
         angle_robot = self.calculate_angle_using_path(idx_robot)
         self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, supervisor=self.supervisor)
         self.person = Robot('person', init_pos=self.path[idx_start],  max_speed=4, angle=angle_person, supervisor=self.supervisor)
-        self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start,))
+
+        self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start, self.robot,))
         # while True:
         #     print(self.get_angle_person_robot())
         #     time.sleep(0.5)
@@ -514,6 +539,17 @@ class WebotsEnv(gym.Env):
         if distance < 0.8 or self.robot.is_collided:
             return True
         return False
+
+    def get_goal_person(self):
+        pos_person = self.person.get_pos()
+        pos_goal = None
+        angle_distance = None
+        for idx in range(self.current_path_idx + 1, len(self.path) - 3):
+            if math.hypot(pos_person[0]-self.path[idx][0], pos_person[1]-self.path[idx][1]) > 3:
+                pos_goal = self.path[idx]
+                angle_distance= self.person.angle_distance_to_point(pos_goal)
+                break
+        return pos_goal, angle_distance
 
     def get_reward(self):
         reward = 0
