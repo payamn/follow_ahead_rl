@@ -23,7 +23,7 @@ class Model(tf.keras.Model):
     def __init__(self, num_actions):
         super().__init__('mlp_policy')
         # no tf.get_variable(), just simple Keras API
-        self.conv_1 = kl.Conv2D(32, (10, 10), activation='relu', input_shape=(50, 100, 1))
+        self.conv_1 = kl.Conv2D(32, (10, 10), activation='relu', input_shape=(50, 100, 5))
         self.batch_norm1 = kl.BatchNormalization()
         self.conv_2 = kl.Conv2D(32, (8, 8), activation='relu')
         self.batch_norm2 = kl.BatchNormalization()
@@ -89,7 +89,7 @@ class A2CAgent:
         # storage helpers for a single batch of data
         actions = np.empty((batch_sz,), dtype=np.int32)
         rewards, dones, values = np.empty((3, batch_sz))
-        observations = [np.empty((batch_sz,) + env.observation_space[0].shape + (1,)),
+        observations = [np.empty((batch_sz,) + env.observation_space[0].shape ),
                         np.empty((batch_sz,) + env.observation_space[1].shape)]
         # training loop: collect samples, send to optimizer, repeat updates times
         ep_rews = [0.0]

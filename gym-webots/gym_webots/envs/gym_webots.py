@@ -138,6 +138,31 @@ class Supervisor:
                 time.sleep(3)
                 rospy.logerr("reset not happen try it again Error: {}".format(e))
 
+class History():
+    def __init__(self, window_size, update_time):
+        self.data = [None for x in range(window_size)]
+        self.idx = 0
+        self.update_time = update_time
+        self.last_update = 0
+        self.window_size = window_size
+
+    def add_element(self, element):
+        if self.data[self.idx] is None:
+            for idx in range (self.window_size):
+                self.data[idx] = element
+        self.data[self.idx] = element
+        if rospy.Time.now().secs - self.last_update > self.update_time:
+            self.last_update = rospy.Time.now().secs
+            self.idx = (self.idx + 1) % self.window_size
+
+    def get_elemets(self):
+        return_data = []
+        for data in (self.data[self.idx:] + self.data[:self.idx]):
+            if data is not None:
+                return_data.append(data)
+
+        return return_data
+
 class Robot():
     def __init__(self, name, init_pos, angle, supervisor, max_speed=6.3, model='Pioneer3at'):
         self.model = 'Pioneer3at'
@@ -153,6 +178,7 @@ class Robot():
         self.max_laser_range = 5.0 # meter
         self.width_laser_image = 100
         self.height_laser_image = 50
+        self.pos_history = History(5, 0.5)
         self.pos = (None, None)
         try:
             self.init_services()
@@ -162,7 +188,9 @@ class Robot():
         self.angular_pid = PID(0.75, 0, 0.01, setpoint=0)
         self.linear_pid = PID(4, 0, 0.05, setpoint=0)
         self.orientation = angle
+        self.orientation_history = History(5, 0.5)
         self.scan_image = None
+        self.scan_image_history = History(5, 0.5)
         self.is_collided = False
         self.pos_sub = rospy.Subscriber(self.robot_service_str+'/gps/values', NavSatFix, self.position_cb)
         self.imu_sub = rospy.Subscriber(self.robot_service_str+'/inertial_unit/roll_pitch_yaw', Imu, self.imu_cb)
@@ -274,6 +302,7 @@ class Robot():
     def imu_cb(self, imo_msg):
         self.orientation = quat2euler(
             imo_msg.orientation.x, imo_msg.orientation.y, imo_msg.orientation.z, imo_msg.orientation.w)[0]
+        self.orientation_history.add_element(self.orientation)
 
     def get_laser_image(self):
         while self.scan_image is None:
@@ -298,6 +327,7 @@ class Robot():
             print ("problem, max x:{} max y:{}".format(np.max(x), np.max(y)))
         scan_image = np.zeros((self.height_laser_image, self.width_laser_image), dtype=np.uint8)
         scan_image[y, x] = 255
+        self.scan_image_history.add_element(scan_image)
         self.scan_image = scan_image
         # if "robot" in self.name:
         #     cv.namedWindow("laser {}".format(self.name), cv.WINDOW_AUTOSIZE)
@@ -307,6 +337,8 @@ class Robot():
     def position_cb(self, pos_msg):
         prev_pos = self.pos
         self.pos = (-pos_msg.longitude, -pos_msg.latitude, pos_msg.header.stamp.to_sec())
+
+        self.pos_history.add_element(self.pos)
 
         # calculate velocity
         if prev_pos[0] is not None:
@@ -360,7 +392,7 @@ class WebotsEnv(gym.Env):
     def calculate_angle_using_path(self, idx):
         return math.atan2(self.path[idx+1][1] - self.path[idx][1], self.path[idx+1][0] - self.path[idx][0])
 
-    def get_person_position_heading_relative_robot(self):
+    def get_person_position_heading_relative_robot(self, get_history=False):
         got_position = False
         while (not got_position):
 
@@ -374,19 +406,35 @@ class WebotsEnv(gym.Env):
                 self.reset()
                 time.sleep(3)
 
-        person_pos = self.person.get_pos()
         robot_pos = self.robot.get_pos()
-        person_pos_heading = np.asarray([person_pos[0]+ math.cos(self.person.orientation), person_pos[1] + math.sin(self.person.orientation)])
-        person_poses = [person_pos, person_pos_heading]
-        person_poses_transformed = [ np.asarray(pos) - np.asarray(robot_pos) for pos in person_poses]
-        angle_robot = math.pi/2 - self.robot.orientation
-        rotation_matrix = np.asarray([[math.cos(angle_robot), -math.sin(angle_robot)], [math.sin(angle_robot), math.cos(angle_robot)]])
-        person_poses_rt = [np.dot(rotation_matrix, matrix) for matrix in person_poses_transformed]
+        person_pos_history = self.person.pos_history.get_elemets()
+        person_orientation_history = self.person.orientation_history.get_elemets()
 
-        heading_person = np.asarray(math.atan2(person_poses_rt[1][1]-person_poses_rt[0][1],person_poses_rt[1][0]-person_poses_rt[0][0]))
-        # rospy.loginfo ( "angle {}, person_pos {}".format(np.rad2deg(heading_person), person_poses_rt[0]))
-        # time.sleep(0.5)
-        return person_poses_rt[0], heading_person
+        while len(person_pos_history) != self.person.pos_history.window_size or len(person_orientation_history) != self.person.orientation_history.window_size:
+            rospy.logwarn_throttle (1, "waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
+            robot_pos = self.robot.get_pos()
+            person_pos_history = self.person.pos_history.get_elemets()
+            person_orientation_history = self.person.orientation_history.get_elemets()
+            time.sleep(0.1)
+
+        person_pos_and_headings = [(person_pos_history[idx][:2] ,np.asarray((person_pos_history[idx][0] + math.cos(person_orientation_history[idx]), person_pos_history[idx][1] + math.sin(person_orientation_history[idx])))) for idx in range (len(person_pos_history)) ]
+        angle_robot = math.pi / 2 - self.robot.orientation
+        rotation_matrix = np.asarray(
+            [[math.cos(angle_robot), -math.sin(angle_robot)], [math.sin(angle_robot), math.cos(angle_robot)]])
+        poses = []
+        heading = []
+        for person_pos_and_heading in person_pos_and_headings:
+            person_poses_transformed = [np.asarray(pos) - np.asarray(robot_pos) for pos in person_pos_and_heading]
+            person_poses_rt = [np.dot(rotation_matrix, matrix) for matrix in person_poses_transformed]
+            heading_person = np.asarray(math.atan2(person_poses_rt[1][1] - person_poses_rt[0][1],
+                                                   person_poses_rt[1][0] - person_poses_rt[0][0]))
+            poses.append(person_poses_rt[0])
+            heading.append(heading_person)
+
+        if not get_history:
+            return((poses[0], heading[0]))
+
+        return poses, heading
 
     def set_robot_to_auto(self):
         self.robot_mode = 1
@@ -433,6 +481,16 @@ class WebotsEnv(gym.Env):
     def get_laser_scan(self):
         return self.robot.get_laser_image()
 
+    def get_laser_scan_all(self):
+        images = self.robot.scan_image_history.get_elemets()
+        while len(images)!=self.robot.scan_image_history.window_size:
+            images = self.robot.scan_image_history.get_elemets()
+            rospy.logwarn_throttle(1, "wait for laser scan to get filled")
+            time.sleep(0.1)
+        images = np.asarray(images)
+
+        return (images.reshape((images.shape[1], images.shape[2], images.shape[0])))
+
     def get_angle_person_robot(self):
         orientation_person = self.person.orientation
         angle_robot = self.robot.orientation
@@ -445,11 +503,11 @@ class WebotsEnv(gym.Env):
         return angle * 180 / math.pi
 
     def get_observation(self):
-        position, heading = self.get_person_position_heading_relative_robot()
-        orientation_position = np.append(position, heading)
+        poses, headings = self.get_person_position_heading_relative_robot(get_history=True)
+        orientation_position = np.append(poses, headings)
         velocities = np.asarray([self.person.get_velocity(), self.robot.get_velocity()])
 
-        return self.get_laser_scan(), np.append(orientation_position, velocities)
+        return self.get_laser_scan_all(), np.append(orientation_position, velocities)
 
     def __init__(self):
         self.node = rospy.init_node("webots_env", anonymous=True)
@@ -489,8 +547,8 @@ class WebotsEnv(gym.Env):
 
         self.observation_space = gym.spaces.Tuple(
                 (
-                    gym.spaces.Box(low=0, high=1, shape=(50, 100)),
-                    gym.spaces.Box(low=0, high=1, shape=(5,))
+                    gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
+                    gym.spaces.Box(low=0, high=1, shape=(17,))
                 )
             )
         # Action space omits the Tackle/Catch actions, which are useful
@@ -500,7 +558,7 @@ class WebotsEnv(gym.Env):
         self.max_distance = 2.5
         self.number_of_steps = 0
         self.max_numb_steps = 100
-        self.reward_range = [-1, 1]
+        self.reward_range = [0, 2]
         self.is_reseting = False
 
     def __del__(self):
@@ -531,6 +589,7 @@ class WebotsEnv(gym.Env):
             print('max number of steps episode over')
         reward = min(max(reward, -1), 1)
         rospy.loginfo("reward: {} obs: {}".format(reward, ob[1]))
+        reward += 1
         return ob, reward, episode_over, {}
 
     def is_collided(self):
