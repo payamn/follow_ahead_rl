@@ -178,6 +178,17 @@ class A2CAgent:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='input weight file of the network')
     parser.add_argument('--weight', default="weights/bestloses", type=str, help='weight file')
+    gpus = tf.config.experimental.list_physical_devices('GPU')
+
+    try:
+        tf.config.experimental.set_virtual_device_configuration(
+            gpus[0],
+            [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=5000)])
+        logical_gpus = tf.config.experimental.list_logical_devices('GPU')
+        print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
+    except RuntimeError as e:
+        # Virtual devices must be set before GPUs have been initialized
+        print(e)
 
     args = parser.parse_args()
     logging.getLogger().setLevel(logging.INFO)

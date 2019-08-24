@@ -145,15 +145,22 @@ class History():
         self.update_time = update_time
         self.last_update = 0
         self.window_size = window_size
+        # to keep track of last element always in self.idx
+        self.update_idx = False
 
     def add_element(self, element):
+        if self.update_idx:
+            self.idx = (self.idx + 1) % self.window_size
+            self.update_idx = True
+
         if self.data[self.idx] is None:
             for idx in range (self.window_size):
                 self.data[idx] = element
         self.data[self.idx] = element
         if rospy.Time.now().secs - self.last_update > self.update_time:
             self.last_update = rospy.Time.now().secs
-            self.idx = (self.idx + 1) % self.window_size
+            self.update_idx = True
+
 
     def get_elemets(self):
         return_data = []
@@ -178,7 +185,7 @@ class Robot():
         self.max_laser_range = 5.0 # meter
         self.width_laser_image = 100
         self.height_laser_image = 50
-        self.pos_history = History(5, 0.5)
+        self.pos_history = History(5, 1)
         self.pos = (None, None)
         try:
             self.init_services()
@@ -188,9 +195,9 @@ class Robot():
         self.angular_pid = PID(0.75, 0, 0.01, setpoint=0)
         self.linear_pid = PID(4, 0, 0.05, setpoint=0)
         self.orientation = angle
-        self.orientation_history = History(5, 0.5)
+        self.orientation_history = History(5, 1)
         self.scan_image = None
-        self.scan_image_history = History(5, 0.5)
+        self.scan_image_history = History(5, 1)
         self.is_collided = False
         self.pos_sub = rospy.Subscriber(self.robot_service_str+'/gps/values', NavSatFix, self.position_cb)
         self.imu_sub = rospy.Subscriber(self.robot_service_str+'/inertial_unit/roll_pitch_yaw', Imu, self.imu_cb)
@@ -502,8 +509,30 @@ class WebotsEnv(gym.Env):
         angle = math.acos(dot / (np.linalg.norm(heading_person_vec) * np.linalg.norm(robot_person_vec)))
         return angle * 180 / math.pi
 
+    def visualize_observation(self, poses, headings, laser_scans):
+        image = np.zeros((500, 500, 3))
+        print (poses)
+        for idx in range(len(poses)):
+            pt1 = (poses[idx][0] * 50 + 250, poses[idx][1] * 50 + 250)
+            pt2 = (pt1[0] + math.cos(headings[idx]) * 30, pt1[1] + math.sin(headings[idx]) * 30)
+
+            pt1 = (int(pt1[0]), int(pt1[1]))
+            pt2 = (int(pt2[0]), int(pt2[1]))
+
+            pos_goal, angle_distance = self.get_goal_person()
+            pt_goal = np.asarray(angle_distance)
+            pt_goal = (int(math.sin(pt_goal[0])* pt_goal[1] * 50 + 250), int(math.cos(pt_goal[0]) * pt_goal[1] * 50 + 250))
+            cv.circle(image, pt1, 5, (255, 255 - idx*40, idx*40))
+
+            # cv.arrowedLine(image, pt1, pt2, (0, 0, 255), 5, tipLength=0.6)
+            cv.circle(image, pt_goal, 20, (255, 255, 0))
+            # cv.imshow("d", pickle_file[0][0])
+            cv.imshow("d", image)
+        cv.waitKey(1)
+
     def get_observation(self):
         poses, headings = self.get_person_position_heading_relative_robot(get_history=True)
+        # self.visualize_observation(poses, headings, self.get_laser_scan())
         orientation_position = np.append(poses, headings)
         velocities = np.asarray([self.person.get_velocity(), self.robot.get_velocity()])
 
@@ -531,6 +560,8 @@ class WebotsEnv(gym.Env):
     def init_simulator(self):
         self.is_pause = True
         idx_start = random.randint(0, len(self.path)-20)
+        self.current_path_idx = idx_start
+
         init_pos_person = self.path[idx_start]
         angle_person = self.calculate_angle_using_path(idx_start)
         idx_robot = idx_start + 1
@@ -588,7 +619,7 @@ class WebotsEnv(gym.Env):
             episode_over = True
             print('max number of steps episode over')
         reward = min(max(reward, -1), 1)
-        rospy.loginfo("reward: {} obs: {}".format(reward, ob[1]))
+        rospy.loginfo("reward: {} ".format(reward))
         reward += 1
         return ob, reward, episode_over, {}
 
