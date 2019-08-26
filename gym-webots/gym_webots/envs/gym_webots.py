@@ -260,8 +260,9 @@ class Robot():
             rospy.logwarn("waiting for pos to be available")
             counter_problem += 1
             time.sleep(0.1)
-            if counter_problem > 300:
-              raise Exception('Probable shared memory issue happend')
+            if counter_problem > 300 or self.reset:
+                self.reset = True
+                raise Exception('Probable shared memory issue happend')
         return self.pos[:2]
 
     def imu_cb(self, imo_msg):
@@ -385,7 +386,7 @@ class WebotsEnv(gym.Env):
             rospy.loginfo("path follower got the lock")
             path = self.path[idx_start:]
             for idx, point in enumerate(path):
-                while self.is_pause:
+                while self.is_pause and not self.is_reseting:
                     time.sleep(0.1)
                 try:
                     robot.go_to_pos(point)
