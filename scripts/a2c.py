@@ -44,6 +44,7 @@ class Model(tf.keras.Model):
     def call(self, inputs):
         x1 = tf.convert_to_tensor(inputs[0])
         x1 = tf.dtypes.cast(x1, tf.float32)
+
         x2 = tf.convert_to_tensor(inputs[1])
         # separate hidden layers from the same input tensor
         out_image =  self.conv_1(x1)
@@ -108,10 +109,10 @@ class A2CAgent:
                 ep_rews[-1] += rewards[step]
                 if dones[step]:
                     ep_rews.append(0.0)
-                    print("before reset")
-                    next_obs = env.reset()
-                    print("reset done")
-                    env.resume_simulator()
+                    # print("before reset")
+                    # next_obs = env.reset()
+                    # print("reset done")
+                    # env.resume_simulator()
                     logging.info("Episode: %03d, Reward: %03d " % (len(ep_rews) - 1, ep_rews[-2]))
                     print("Episode: %d, Reward: %f" % (len(ep_rews) - 1, ep_rews[-2]))
                 # print (step, actions[step])

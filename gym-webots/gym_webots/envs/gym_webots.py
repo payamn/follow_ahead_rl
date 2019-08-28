@@ -384,7 +384,50 @@ class Robot():
         except Exception as e:
             rospy.logerr(e)
 
-class WebotsEnv(gym.Env):
+class FollowInstance():
+    def __init__(self, instance_number, path):
+        # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
+        self.use_goal = True
+        self.supervisor = Supervisor()
+        # read the path for robot
+        self.path = path
+        self.instance_number = instance_number
+        self.is_reseting = True
+        self.lock = _thread.allocate_lock()
+        self.robot_mode = 0
+
+
+    def init_instance(self, idx_start):
+        self.is_pause = True
+        self.current_path_idx = idx_start
+
+        init_pos_person = self.path[idx_start]
+        angle_person = self.calculate_angle_using_path(idx_start)
+        idx_robot = idx_start + 1
+        while (math.hypot (self.path[idx_robot][1] - self.path[idx_start][1], self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
+            idx_robot += 1
+        angle_robot = self.calculate_angle_using_path(idx_robot)
+        self.robot = Robot('my_robot_' + str(self.instance_number), init_pos=self.path[idx_robot],  angle=angle_robot, supervisor=self.supervisor)
+        self.person = Robot('person_' + str(self.instance_number), init_pos=self.path[idx_start],  max_speed=4, angle=angle_person, supervisor=self.supervisor)
+
+        self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start, self.robot,))
+        # while True:
+        #     print(self.get_angle_person_robot())
+        #     time.sleep(0.5)
+
+
+        # Action space omits the Tackle/Catch actions, which are useful
+        # on defense
+        self.min_distance = 1
+        self.max_distance = 2.5
+        self.number_of_steps = 0
+        self.max_numb_steps = 100
+        self.is_reseting = False
+
+    def get_current_idx_goal(self):
+        while (self.is_reseting):
+            time.sleep(0.05)
+        return self.current_path_idx
 
     def pause(self):
         self.is_pause = True
@@ -398,6 +441,7 @@ class WebotsEnv(gym.Env):
 
     def calculate_angle_using_path(self, idx):
         return math.atan2(self.path[idx+1][1] - self.path[idx][1], self.path[idx+1][0] - self.path[idx][0])
+
 
     def get_person_position_heading_relative_robot(self, get_history=False):
         got_position = False
@@ -538,11 +582,121 @@ class WebotsEnv(gym.Env):
 
         return self.get_laser_scan_all(), np.append(orientation_position, velocities)
 
+    def __del__(self):
+        # todo
+        return
+
+    def take_action(self, action):
+        self.robot.take_action(action)
+        return
+
+    def step(self, action):
+        self.number_of_steps += 1
+        self.take_action(action)
+        reward = self.get_reward()
+        ob = self.get_observation()
+        episode_over = False
+        rel_person = self.get_person_position_heading_relative_robot()[0]
+        distance = math.hypot(rel_person[0], rel_person[1])
+        if self.is_collided():
+            episode_over = True
+            print('collision happened episode over')
+            reward -= 0.5
+        elif distance > 5:
+            episode_over = True
+            print('max distance happened episode over')
+        elif self.number_of_steps > self.max_numb_steps:
+            episode_over = True
+            print('max number of steps episode over')
+        reward = min(max(reward, -1), 1)
+        rospy.loginfo("reward: {} ".format(reward))
+        reward += 1
+        return ob, reward, episode_over, {}
+
+    def is_collided(self):
+        rel_person = self.get_person_position_heading_relative_robot()[0]
+        distance = math.hypot(rel_person[0], rel_person[1])
+        if distance < 0.8 or self.robot.is_collided:
+            return True
+        return False
+
+    def get_goal_person(self):
+        pos_person = self.person.get_pos()
+        pos_goal = None
+        angle_distance = None
+        for idx in range(self.current_path_idx + 1, len(self.path) - 3):
+            if math.hypot(pos_person[0]-self.path[idx][0], pos_person[1]-self.path[idx][1]) > 3:
+                pos_goal = self.path[idx]
+                angle_distance= self.robot.angle_distance_to_point(pos_goal)
+                break
+        return pos_goal, angle_distance
+
+    def get_reward(self):
+        reward = 0
+        if self.use_goal:
+            point_goal = self.path[self.current_path_idx + 1]
+            pos_robot = self.robot.get_pos()
+            distance_goal = math.hypot(pos_robot[1] - point_goal[1], pos_robot[0] - point_goal[0])
+            # reward = max (-distance_goal/3.0, -0.9) + 0.4 # between -0.5,0.4
+            robot_pos_heading = np.asarray(
+                    [pos_robot[0] + math.cos(self.robot.orientation), pos_robot[1] + math.sin(self.robot.orientation)])
+            p12 = math.hypot(pos_robot[1]-robot_pos_heading[1], pos_robot[0]-robot_pos_heading[0])
+            p13 = math.hypot(point_goal[1]-pos_robot[1], point_goal[0]-pos_robot[0])
+            p23 = math.hypot(robot_pos_heading[1]-point_goal[1], robot_pos_heading[0]-point_goal[0])
+
+            math.acos((p12*p12+ p13*p13- p23*p23) / (2 * p12 * p13))
+            angle_robot_goal = np.rad2deg(math.acos((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13)))
+            reward += ((60 - angle_robot_goal)/120.0)/2 +0.25 # between -0.25,0.5
+            pos_rel = self.get_person_position_heading_relative_robot()[0]
+            distance = math.hypot(pos_rel[0], pos_rel[1])
+
+            if distance < 1.5:
+                reward -= (1.5-distance)/2.0
+            elif distance > 2.5:
+                reward -= (distance-2.5)/2.0
+            else: # distance between 1.5 to 2.5
+                reward += 0.5 - abs(distance-2)/2.0 # between 0.25-0.5
+        else:
+            pos_rel = self.get_person_position_heading_relative_robot()[0]
+            distance = math.hypot(pos_rel[0], pos_rel[1])
+            angle_robot_person = self.get_angle_person_robot()
+            # Negative reward for being behind the person
+            if self.is_collided():
+                reward -= 1
+            if not 90 > angle_robot_person > 0:
+                reward -= distance/6.0
+            elif self.min_distance < distance < self.max_distance:
+                reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
+            elif distance < self.min_distance:
+                reward -= 1 - distance / self.min_distance
+            else:
+                reward -= distance / 7.0
+            reward = min(max(reward, -1), 1)
+            # ToDO check for obstacle
+        return reward
+
+    def reset(self, new_init_pos):
+        self.is_reseting = True
+        self.robot.reset = True
+        self.person.reset = True
+        rospy.loginfo("trying to get the lock")
+        with self.lock:
+            rospy.loginfo("got the lock")
+            self.robot.__del__()
+            self.person.__del__()
+            self.init_instance(new_init_pos)
+        """ Repeats NO-OP action until a new episode begins. """
+
+        return self.get_observation()
+
+class WebotsEnv(gym.Env):
+
     def __init__(self):
         self.node = rospy.init_node("webots_env", anonymous=True)
         # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
+        self.number_of_instances = 6
+        self.instance_dic = {}
         self.use_goal = True
-        self.supervisor = Supervisor()
         # read the path for robot
         self.path = []
         try:
@@ -550,47 +704,63 @@ class WebotsEnv(gym.Env):
                 self.path = pickle.load(f)
         except Exception as e:
             print(e)
-        self.is_reseting = True
         self.lock = _thread.allocate_lock()
-        self.robot_mode = 0
 
         with self.lock:
             self.init_simulator()
 
     def init_simulator(self):
-        self.is_pause = True
-        idx_start = random.randint(0, len(self.path)-20)
+        for instance in range(self.number_of_instances):
+            not_found = True
+            while not_found == True:
+                not_found = False
+                idx_start = random.randint(0, len(self.path) - 20)
+                init_pos = self.path[idx_start]
+                for idx in self.instance_dic:
+                    goal = self.path[self.instance_dic[idx].get_current_idx_goal()]
+                    if math.hypot(init_pos[0]-goal[0], init_pos[1]-goal[1]) < 8:
+                        not_found=True
+                        break
+            self.instance_dic[instance] = FollowInstance(instance, self.path)
+            _thread.start_new_thread(self.instance_dic[instance].init_instance, (idx_start,))
         self.current_path_idx = idx_start
 
-        init_pos_person = self.path[idx_start]
-        angle_person = self.calculate_angle_using_path(idx_start)
-        idx_robot = idx_start + 1
-        while (math.hypot (self.path[idx_robot][1] - self.path[idx_start][1], self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
-            idx_robot += 1
-        angle_robot = self.calculate_angle_using_path(idx_robot)
-        self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, supervisor=self.supervisor)
-        self.person = Robot('person', init_pos=self.path[idx_start],  max_speed=4, angle=angle_person, supervisor=self.supervisor)
-
-        self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start, self.robot,))
-        # while True:
-        #     print(self.get_angle_person_robot())
-        #     time.sleep(0.5)
-
         self.observation_space = gym.spaces.Tuple(
-                (
-                    gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
-                    gym.spaces.Box(low=0, high=1, shape=(17,))
-                )
+            (
+                gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
+                gym.spaces.Box(low=0, high=1, shape=(17,))
             )
+        )
         # Action space omits the Tackle/Catch actions, which are useful
         # on defense
         self.action_space = gym.spaces.Discrete(8)
-        self.min_distance = 1
-        self.max_distance = 2.5
-        self.number_of_steps = 0
-        self.max_numb_steps = 100
         self.reward_range = [0, 2]
-        self.is_reseting = False
+
+    def pause(self):
+        for idx in self.instance_dic:
+            self.instance_dic[idx].pause()
+
+    def resume_simulator(self):
+        for idx in self.instance_dic:
+            self.instance_dic[idx].resume_simulator()
+
+
+    def set_robot_to_auto(self):
+        for idx in self.instance_dic:
+            self.instance_dic[idx].set_robot_to_auto()
+
+
+    def visualize_observation(self, poses, headings, laser_scans):
+        for idx in self.instance_dic:
+            self.instance_dic[idx]. visualize_observation(poses, headings, laser_scans)
+
+    def get_observation(self):
+        poses, headings = self.get_person_position_heading_relative_robot(get_history=True)
+        # self.visualize_observation(poses, headings, self.get_laser_scan())
+        orientation_position = np.append(poses, headings)
+        velocities = np.asarray([self.person.get_velocity(), self.robot.get_velocity()])
+
+        return self.get_laser_scan_all(), np.append(orientation_position, velocities)
 
     def __del__(self):
         # todo
