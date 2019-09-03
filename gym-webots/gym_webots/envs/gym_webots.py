@@ -12,6 +12,7 @@ import numpy as np
 import cv2 as cv
 
 import rospy
+import rosgraph
 from squaternion import quat2euler
 
 from sensor_msgs.msg import NavSatFix
@@ -50,11 +51,27 @@ class Service:
 
     def check(self):
         rospy.logdebug("check service " + self.str)
+        no_ros = True
+        while no_ros:
+            try:
+                rosgraph.Master('/rostopic').getPid()
+                no_ros = False
+            except socket.error:
+                rospy.logerr("rosmaster is not there try again")
+
         rospy.wait_for_service(self.str)
         self.srv = rospy.ServiceProxy(self.str, self.type_off)
 
     def call(self, value):
         error_counter = 0
+        no_ros = True
+        while no_ros:
+            try:
+                rosgraph.Master('/rostopic').getPid()
+                no_ros = False
+            except socket.error:
+                rospy.logerr("rosmaster is not there try again")
+
         while (error_counter<6):
             try:
                 return_msg = self.srv.call(value)
@@ -92,6 +109,7 @@ class Supervisor:
     def init_services(self):
         self.services['create_object'] = Service(self.root_service_str + "field/import_node_from_string",
                                                  field_import_node_from_string)
+        self.services['get_root'] = Service(self.root_service_str + "get_root", get_uint64)
         self.services['get_root'] = Service(self.root_service_str + "get_root", get_uint64)
         self.services['get_field'] = Service(self.root_service_str + "node/get_field", node_get_field)
         self.services['get_from_deff'] = Service(self.root_service_str + "get_from_def", supervisor_get_from_def)
@@ -172,6 +190,7 @@ class History():
 
 class Robot():
     def __init__(self, name, init_pos, angle, supervisor, max_speed=6.3, model='Pioneer3at'):
+        self.deleted = False
         self.model = 'Pioneer3at'
         self.name = name
         self.robot_service_str = '/{}/'.format(self.name)
@@ -256,6 +275,8 @@ class Robot():
 
     def angle_distance_to_point(self, pos):
         current_pos = self.get_pos()
+        if current_pos[0] is None:
+            return None, None
         angle = math.atan2(pos[1] - current_pos[1], pos[0] - current_pos[0])
         distance = math.hypot(pos[0] - current_pos[0], pos[1] - current_pos[1])
         angle = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
@@ -265,9 +286,11 @@ class Robot():
         distance = 2
         # diff_angle_prev = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
         while not distance < 1.5:
-            if self.is_pause:
+            if self.is_pause or self.reset:
                 return
             diff_angle, distance = self.angle_distance_to_point(pos)
+            if distance is None:
+                return
             # if abs(diff_angle_prev - diff_angle) > math.pi*3/:
             #     diff_angle = diff_angle_prev
             # else:
@@ -298,6 +321,8 @@ class Robot():
     def get_pos(self):
         counter_problem = 0
         while self.pos[0] is None:
+            if self.reset:
+                return (None, None)
             rospy.logwarn("waiting for pos to be available")
             time.sleep(0.1)
             counter_problem += 1
@@ -376,13 +401,17 @@ class Robot():
             self.services[wheel+"_vel"] = Service(self.robot_service_str + wheel + '/set_velocity', set_float)
             self.services[wheel + "_vel"].call(0)
     def __del__(self):
-        rospy.loginfo("removing robot:" + self.name)
+        if self.deleted:
+            return
+        rospy.loginfo("removing robot: " + self.name)
         try:
             self.imu_sub.unregister()
             self.pos_sub.unregister()
             self.laser_sub.unregister()
         except Exception as e:
             rospy.logerr(e)
+        rospy.loginfo("removed: " + self.name)
+        self.deleted = True
 
 class WebotsEnv(gym.Env):
 
@@ -410,7 +439,7 @@ class WebotsEnv(gym.Env):
             except Exception as e:
                 rospy.logerr(e)
                 rospy.loginfo("resseting because of exception (in get_person_position heading rel..)")
-                self.reset()
+                self.reset_webots()
                 time.sleep(3)
 
         robot_pos = self.robot.get_pos()
@@ -460,7 +489,12 @@ class WebotsEnv(gym.Env):
             for idx in range (idx_start, len(self.path)-3):
                 point = self.path[idx]
                 self.current_path_idx = idx
+                counter_pause = 0
                 while self.is_pause:
+                    counter_pause+=1
+                    rospy.loginfo("pause in path follower")
+                    if self.is_reseting or counter_pause > 200:
+                        return
                     time.sleep(0.1)
                 try:
                     person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True,))
@@ -554,6 +588,7 @@ class WebotsEnv(gym.Env):
         self.lock = _thread.allocate_lock()
         self.robot_mode = 0
 
+        self.reset_webots()
         with self.lock:
             self.init_simulator()
 
@@ -588,9 +623,18 @@ class WebotsEnv(gym.Env):
         self.min_distance = 1
         self.max_distance = 2.5
         self.number_of_steps = 0
-        self.max_numb_steps = 100
+        self.max_numb_steps = 200
         self.reward_range = [0, 2]
         self.is_reseting = False
+
+    def reset_webots(self):
+        subprocess.call('pkill -9 webots-bin', shell=True)
+        subprocess.call('tmux kill-session -t webots', shell=True)
+        subprocess.Popen(['tmux', 'new-session', '-d', '-s', 'webots'])
+        subprocess.Popen(['tmux', 'send-keys', '-t', 'webots', 'source ~/.bashrc', 'C-m'])
+        subprocess.Popen(['tmux', 'send-keys', '-t', "webots", "webots --mode=fast", "C-m"])
+        time.sleep(4)
+        self.supervisor = Supervisor()
 
     def __del__(self):
         # todo
@@ -650,11 +694,9 @@ class WebotsEnv(gym.Env):
             # reward = max (-distance_goal/3.0, -0.9) + 0.4 # between -0.5,0.4
             robot_pos_heading = np.asarray(
                     [pos_robot[0] + math.cos(self.robot.orientation), pos_robot[1] + math.sin(self.robot.orientation)])
+            p23 = math.hypot(robot_pos_heading[1]-point_goal[1], robot_pos_heading[0]-point_goal[0])
             p12 = math.hypot(pos_robot[1]-robot_pos_heading[1], pos_robot[0]-robot_pos_heading[0])
             p13 = math.hypot(point_goal[1]-pos_robot[1], point_goal[0]-pos_robot[0])
-            p23 = math.hypot(robot_pos_heading[1]-point_goal[1], robot_pos_heading[0]-point_goal[0])
-
-            math.acos((p12*p12+ p13*p13- p23*p23) / (2 * p12 * p13))
             angle_robot_goal = np.rad2deg(math.acos((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13)))
             reward += ((60 - angle_robot_goal)/120.0)/2 +0.25 # between -0.25,0.5
             pos_rel = self.get_person_position_heading_relative_robot()[0]

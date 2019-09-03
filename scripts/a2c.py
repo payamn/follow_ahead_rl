@@ -23,14 +23,20 @@ class Model(tf.keras.Model):
     def __init__(self, num_actions):
         super().__init__('mlp_policy')
         # no tf.get_variable(), just simple Keras API
-        self.conv_1 = kl.Conv2D(32, (10, 10), activation='relu', input_shape=(50, 100, 5))
+        self.conv_1 = kl.Conv2D(32, (15, 15), activation='relu', input_shape=(50, 100, 5))
         self.batch_norm1 = kl.BatchNormalization()
-        self.conv_2 = kl.Conv2D(32, (8, 8), activation='relu')
+        self.conv_2 = kl.Conv2D(32, (12, 12), activation='relu')
         self.batch_norm2 = kl.BatchNormalization()
-        self.conv_3 = kl.Conv2D(32, (5, 5), activation='relu')
+        self.conv_3 = kl.Conv2D(32, (10, 10), activation='relu')
         self.batch_norm3 = kl.BatchNormalization()
+        self.conv_4 = kl.Conv2D(32, (8, 8), activation='relu')
+        self.batch_norm4 = kl.BatchNormalization()
+        self.fc_image = kl.Dense(256, activation='relu')
 
         self.fc1 = kl.Dense(32, activation='relu')
+        self.fc2 = kl.Dense(64, activation='relu')
+        self.fc3 = kl.Dense(128, activation='relu')
+        self.fc4 = kl.Dense(256, activation='relu')
 
         self.concat = kl.Concatenate(axis=-1)
         self.hidden1 = kl.Dense(128, activation='relu' )
@@ -45,6 +51,7 @@ class Model(tf.keras.Model):
         x1 = tf.convert_to_tensor(inputs[0])
         x1 = tf.dtypes.cast(x1, tf.float32)
         x2 = tf.convert_to_tensor(inputs[1])
+
         # separate hidden layers from the same input tensor
         out_image =  self.conv_1(x1)
         out_image = self.batch_norm1(out_image)
@@ -52,9 +59,16 @@ class Model(tf.keras.Model):
         out_image = self.batch_norm2(out_image)
         out_image = self.conv_3(out_image)
         out_image = self.batch_norm3(out_image)
+        out_image = self.conv_4(out_image)
+        out_image = self.batch_norm4(out_image)
         flatt = self.flatten(out_image)
+        flatt = self.fc_image(flatt)
 
+        # tf.print(tf.shape(flatt))
         out_person = self.fc1(x2)
+        out_person = self.fc2(out_person)
+        out_person = self.fc3(out_person)
+        out_person = self.fc4(out_person)
 
         flatt = self.concat([out_person, flatt])
         hidden_logs = self.hidden1(flatt)
@@ -85,16 +99,17 @@ class A2CAgent:
             loss=[self._logits_loss, self._value_loss]
         )
 
-    def train(self, env, batch_sz=64, updates=1000000):
+
+    def train(self, env, batch_sz=200, updates=1000000):
         # storage helpers for a single batch of data
         actions = np.empty((batch_sz,), dtype=np.int32)
         rewards, dones, values = np.empty((3, batch_sz))
         observations = [np.empty((batch_sz,) + env.observation_space[0].shape ),
                         np.empty((batch_sz,) + env.observation_space[1].shape)]
-        # training loop: collect samples, send to optimizer, repeat updates times
         ep_rews = [0.0]
         next_obs = env.get_observation()
         best_losses = float('inf')
+        first = True
         for update in range(updates):
             # next_obs, rewards[0], dones[0], _ = env.step(6)
             # continue
@@ -103,6 +118,9 @@ class A2CAgent:
                 observations[0][step] = next_obs[0].copy()
                 observations[1][step] = next_obs[1].copy()
                 actions[step], values[step] = self.model.action_value(next_obs[0][None, :], next_obs[1][None, :])
+                if first:
+                    print(self.model.summary()) # training loop: collect samples, send to optimizer, repeat updates times
+                    first = False
                 next_obs, rewards[step], dones[step], _ = env.step(actions[step])
                 print(actions[step])
                 ep_rews[-1] += rewards[step]
@@ -179,14 +197,14 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='input weight file of the network')
     parser.add_argument('--weight', default="weights/bestloses", type=str, help='weight file')
     gpus = tf.config.experimental.list_physical_devices('GPU')
-
+    print (gpus)
     try:
         tf.config.experimental.set_virtual_device_configuration(
             gpus[0],
             [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=5000)])
         logical_gpus = tf.config.experimental.list_logical_devices('GPU')
         print(len(gpus), "Physical GPUs,", len(logical_gpus), "Logical GPUs")
-    except RuntimeError as e:
+    except Exception as e:
         # Virtual devices must be set before GPUs have been initialized
         print(e)
 
