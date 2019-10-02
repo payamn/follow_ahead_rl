@@ -11,26 +11,19 @@ import _thread
 import numpy as np
 import cv2 as cv
 
-import rospy
-import rosgraph
+import rclpy
+
 from squaternion import quat2euler
+from squaternion import euler2quat
 
-from sensor_msgs.msg import NavSatFix
-from sensor_msgs.msg import Imu
+from ament_index_python.packages import get_package_share_directory
+
+from gazebo_msgs.srv import SpawnEntity
+from gazebo_msgs.srv import DeleteEntity
+
+from gazebo_msgs.msg import ModelStates
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
-
-from webots_ros.srv import get_bool
-from webots_ros.srv import set_int
-from webots_ros.srv import set_float
-from webots_ros.srv import get_int
-from webots_ros.srv import get_uint64
-from webots_ros.srv import node_remove
-from webots_ros.srv import node_get_field
-from webots_ros.srv import node_get_fieldRequest
-from webots_ros.srv import supervisor_get_from_def
-from webots_ros.srv import supervisor_get_from_defRequest
-from webots_ros.srv import field_import_node_from_string
-from webots_ros.srv import field_import_node_from_stringRequest
 
 from simple_pid import PID
 
@@ -42,119 +35,80 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
-class Service:
-    def __init__(self, str, type_off):
-        self.str = str
-        self.type_off = type_off
-        self.check()
-
-    def check(self):
-        rospy.logdebug("check service " + self.str)
-        no_ros = True
-        while no_ros:
-            try:
-                rosgraph.Master('/rostopic').getPid()
-                no_ros = False
-            except socket.error:
-                rospy.logerr("rosmaster is not there try again")
-
-        rospy.wait_for_service(self.str)
-        self.srv = rospy.ServiceProxy(self.str, self.type_off)
-
-    def call(self, value):
-        error_counter = 0
-        no_ros = True
-        while no_ros:
-            try:
-                rosgraph.Master('/rostopic').getPid()
-                no_ros = False
-            except socket.error:
-                rospy.logerr("rosmaster is not there try again")
-
-        while (error_counter<6):
-            try:
-                return_msg = self.srv.call(value)
-                # rospy.loginfo(self.str + ' called')
-                break
-            except Exception as e:
-                rospy.logerr_throttle(1, self.str)
-                print(e)
-                time.sleep(0.1)
-                error_counter += 1
-        if error_counter >= 6:
-            raise Exception('Unsolvable error in service call {}'.format(self.str))
-        return return_msg
-
-
-class Supervisor:
+class Manager:
     def __init__(self):
-        self.root_service_str = '/manager/supervisor/'
+        self.sdf_file_path = os.path.join(
+            get_package_share_directory("turtlebot3_gazebo"), "models",
+            "turtlebot3_burger", "model.sdf")
+        self.node = rclpy.create_node("manager")
+        self.node.get_logger().info(
+            'Creating Service client_delete to connect to `/delete_entity`')
+        self.client_delete = self.node.create_client(DeleteEntity, "/delete_entity")
 
-        self.services = {}
-        self.init_services()
+        self.node.get_logger().info(
+            'Creating Service client_spawn to connect to `/spawn_entity`')
+        self.client_spawn = self.node.create_client(SpawnEntity, "/spawn_entity")
 
-    def get_create_robot_str(self, name, model, translation, rotation):
-        robot_str = 'DEF ' + name + ' ' + model + ' { translation ' + translation + ' rotation ' + rotation + \
-                                        ' controller "ros" \
-                                        controllerArgs "--name=' + name + '" extensionSlot [\
-                                        Accelerometer { lookupTable [ -39.24 -39.24 0.005 39.24 39.24 0.005 ]}\
-                                        Gyro {lookupTable [-50 -50 0.005 50 50 0.005 ]}\
-                                        SickLms291 {translation 0 0.23 -0.136 noise 0.1}\
-                                        GPS {}\
-                                        InertialUnit {}\
-                                        ]}'
-        return robot_str
+    def remove_object(self, name):
+        self.node.get_logger().info("Connecting to `/delete_entity` service...")
+        if not self.client_delete.service_is_ready():
+            self.client_delete.wait_for_service()
+            self.node.get_logger().info("...connected!")
 
-    def init_services(self):
-        self.services['create_object'] = Service(self.root_service_str + "field/import_node_from_string",
-                                                 field_import_node_from_string)
-        self.services['get_root'] = Service(self.root_service_str + "get_root", get_uint64)
-        self.services['get_root'] = Service(self.root_service_str + "get_root", get_uint64)
-        self.services['get_field'] = Service(self.root_service_str + "node/get_field", node_get_field)
-        self.services['get_from_deff'] = Service(self.root_service_str + "get_from_def", supervisor_get_from_def)
-        self.services['remove_object'] = Service(self.root_service_str + "node/remove", node_remove)
-        self.services['reset'] = Service(self.root_service_str + 'simulation_reset', get_bool)
-        self.services['get_state'] = Service(self.root_service_str + 'simulation_get_mode', get_int)
-        self.is_collided = False
-        self.root_node = self.services['get_root'].call(0).value
-        self.child_field = self.services['get_field'].call(
-            node_get_fieldRequest(node=self.root_node, fieldName='children')).field
-        while True:
-            try:
-                time.sleep(0.1)
-                self.services['get_state'].call(True)
-                break
-            except Exception as e:
-                rospy.loginfo_throttle(1, "still waiting for reset to finish", e )
 
-    def remove_object(self, defName):
-        input = supervisor_get_from_defRequest(defName)
-        response = self.services['get_from_deff'].call(input)
-        node = -1
-        if response is not None and response.node != 0:
-            node = response.node
+        # Set data for request
+        request = DeleteEntity.Request()
+        request.name = name
+
+        self.node.get_logger().info("Sending service request to `/delete_entity`")
+        future = self.client_delete.call_async(request)
+        rclpy.spin_until_future_complete(self.node, future)
+        if future.result() is not None:
+            print('response: %r' % future.result())
         else:
-            rospy.loginfo("already removed or a problem happened for def: " + defName)
-        if node != -1:
-            while (self.services['remove_object'].call(node).success != 1):
-                rospy.logerr("remove object error: " + defName)
+            raise RuntimeError(
+                'exception while calling service: %r' % future.exception())
 
-    def create_robot(self, name, model, translation, rotation):
-        self.remove_object(defName=name)
-        robot_str = self.get_create_robot_str(name, model, translation, rotation)
-        self.services['create_object'].call(field_import_node_from_stringRequest(field=self.child_field, position=-1, nodeString=robot_str))
+    def create_robot(self, name, name_space, translation, rotation):
+        self.remove_object(name)
+        self.node.get_logger().info("Connecting to `/spawn_entity` service...")
+        if not self.client_spawn.service_is_ready():
+            self.client_spawn.wait_for_service()
+            self.node.get_logger().info("...connected!")
+
+
+        # Set data for request
+        request = SpawnEntity.Request()
+        request.name = name
+        request.xml = open(self.sdf_file_path, 'r').read()
+        request.robot_namespace = name_space
+        request.initial_pose.position.x = float(translation[0])
+        request.initial_pose.position.y = float(translation[1])
+        request.initial_pose.position.z = float(translation[2])
+        # TODO: check euler angle
+        quaternion_rotation = euler2quat(0, rotation, 0)
+        print(quaternion_rotation)
+        request.initial_pose.orientation.x = quaternion_rotation[3]
+        request.initial_pose.orientation.y = quaternion_rotation[1]
+        request.initial_pose.orientation.z = quaternion_rotation[2]
+        request.initial_pose.orientation.w = quaternion_rotation[0]
+
+        self.node.get_logger().info("Sending service request to `/spawn_entity`")
+        future = self.client_spawn.call_async(request)
+        rclpy.spin_until_future_complete(self.node, future)
+        if future.result() is not None:
+            print('response: %r' % future.result())
+        else:
+            raise RuntimeError(
+                'exception while calling service: %r' % future.exception())
 
     def reset(self):
-        not_pass = True
-        while not_pass:
-            try:
-                self.init_services()
-                not_pass = False
-            except Exception as e:
-                self.services['reset'].call(True)
-                time.sleep(3)
-                rospy.logerr("reset not happen try it again Error: {}".format(e))
+        pass    
+
+rclpy.init() 
+manager = Manager()
+manager.create_robot("man", "man", (0,0.5,0.08), 30*math.pi/180.0)
+exit()
 
 class History():
     def __init__(self, window_size, update_time):
@@ -189,28 +143,21 @@ class History():
         return return_data
 
 class Robot():
-    def __init__(self, name, init_pos, angle, supervisor, max_speed=6.3, model='Pioneer3at'):
-        self.deleted = False
-        self.model = 'Pioneer3at'
+    def __init__(self, name, init_pos, angle, manager, max_speed=6.3, model='Pioneer3at'):
+        manager.create_robot(name, name, init_pos, angle)
         self.name = name
-        self.robot_service_str = '/{}/'.format(self.name)
-        self.supervisor = supervisor
+        self.node = rclpy.create_node(name)
+        self.deleted = False
         self.collision_distance = 0.5
-        self.supervisor.create_robot(self.name, self.model, str(-init_pos[1]) + " 0.178 " + str(-init_pos[0]), "0 1 0 "+str(angle))
-        self.wheels_left = ['back_left_wheel', 'front_left_wheel']
-        self.wheels_right = ['back_right_wheel', 'front_right_wheel']
-        self.services = {}
         self.max_speed = max_speed
         self.max_laser_range = 5.0 # meter
         self.width_laser_image = 100
         self.height_laser_image = 50
         self.pos_history = History(5, 1)
         self.pos = (None, None)
-        try:
-            self.init_services()
-        except Exception as e:
-            rospy.logerr(e)
-            return
+        self.cmd_vel_pub = node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
+        self.model_states_sub = node.create_subscription(ModelStates, '/model_states', self.states_cb, 1)
+        self.laser_sub = node.create_subscription(LaserScan, '/{}/scan',self.laser_cb, 1)
         self.angular_pid = PID(0.75, 0, 0.01, setpoint=0)
         self.linear_pid = PID(4, 0, 0.05, setpoint=0)
         self.orientation = angle
@@ -218,17 +165,58 @@ class Robot():
         self.scan_image = None
         self.scan_image_history = History(5, 1)
         self.is_collided = False
-        self.pos_sub = rospy.Subscriber(self.robot_service_str+'/gps/values', NavSatFix, self.position_cb)
-        self.imu_sub = rospy.Subscriber(self.robot_service_str+'/inertial_unit/roll_pitch_yaw', Imu, self.imu_cb)
-        self.laser_sub = rospy.Subscriber(self.robot_service_str+'/Sick_LMS_291/laser_scan/layer0', LaserScan, self.laser_cb)
         self.is_pause = False
         self.reset = False
         self.velocity_window = 3
         self.velocity_history = np.zeros((self.velocity_window))
         self.last_velocity_idx = 0
 
+    def states_cb(self, states_msg):
+        model_idx = None
+        prev_pos = self.pos
+        for i in range (len(states_msg.name)):
+            if states_msg.name[i] == self.name:
+                model_idx = i
+                break
+        if model_idx is None:
+            print ("cannot find {}".format(self.name))
+            return
+         
+        pos = states_msg.pose[model_idx].pose 
+        self.pos = (pos.position.x, pos.position.y, pos.position.z)
+        self.pos_history.add_element(self.pos)
+
+        # calculate velocity
+        if prev_pos[0] is not None:
+            self.velocity_history[self.last_velocity_idx] = math.hypot(self.pos[1]-prev_pos[1], self.pos[0]-prev_pos[0]) / (self.pos[2]-prev_pos[2])
+            self.last_velocity_idx = (self.last_velocity_idx + 1) % self.velocity_window
+
+
+
+    def laser_cb(self, laser_msg):
+        if self.reset:
+            return
+        angle_increments = np.arange(float(laser_msg.angle_min) - float(laser_msg.angle_min) , float(laser_msg.angle_max) - 0.001 - float(laser_msg.angle_min), float(laser_msg.angle_increment))
+        ranges = np.asarray(laser_msg.ranges, dtype=float)
+        remove_index = np.append(np.argwhere(ranges >= self.max_laser_range), np.argwhere(ranges <= laser_msg.range_min))
+        angle_increments = np.delete(angle_increments, remove_index)
+        ranges = np.delete(ranges, remove_index)
+        min_ranges = float("inf")  if len(ranges)==0  else np.min(ranges)
+        if min_ranges < self.collision_distance:
+            self.is_collided = True
+            rospy.loginfo_throttle(1, "robot collided:")
+        x = np.floor((self.width_laser_image/2.0 - (self.height_laser_image / self.max_laser_range) * np.multiply(np.cos(angle_increments), ranges))).astype(np.int)
+        y = np.floor((self.height_laser_image-1 - (self.height_laser_image / self.max_laser_range) * np.multiply(np.sin(angle_increments), ranges))).astype(np.int)
+        if len(x) > 0 and (np.max(x) >= self.width_laser_image or np.max(y) >= self.height_laser_image):
+            print ("problem, max x:{} max y:{}".format(np.max(x), np.max(y)))
+        scan_image = np.zeros((self.height_laser_image, self.width_laser_image), dtype=np.uint8)
+        scan_image[y, x] = 255
+        self.scan_image_history.add_element(scan_image)
+        self.scan_image = scan_image
+
     def get_velocity(self):
         return np.mean(self.velocity_history)
+
     def pause(self):
         self.is_pause = True
 
@@ -331,40 +319,15 @@ class Robot():
 
         return self.pos[:2]
 
-    def imu_cb(self, imo_msg):
-        self.orientation = quat2euler(
-            imo_msg.orientation.x, imo_msg.orientation.y, imo_msg.orientation.z, imo_msg.orientation.w)[0]
-        self.orientation_history.add_element(self.orientation)
+  #   def imu_cb(self, imo_msg):
+  #       self.orientation = quat2euler(
+  #           imo_msg.orientation.x, imo_msg.orientation.y, imo_msg.orientation.z, imo_msg.orientation.w)[0]
+  #       self.orientation_history.add_element(self.orientation)
 
     def get_laser_image(self):
         while self.scan_image is None:
             time.sleep(0.1)
         return np.expand_dims(self.scan_image, axis=2)
-
-    def laser_cb(self, laser_msg):
-        if self.reset:
-            return
-        angle_increments = np.arange(float(laser_msg.angle_min) - float(laser_msg.angle_min) , float(laser_msg.angle_max) - 0.001 - float(laser_msg.angle_min), float(laser_msg.angle_increment))
-        ranges = np.asarray(laser_msg.ranges, dtype=float)
-        remove_index = np.append(np.argwhere(ranges >= self.max_laser_range), np.argwhere(ranges <= laser_msg.range_min))
-        angle_increments = np.delete(angle_increments, remove_index)
-        ranges = np.delete(ranges, remove_index)
-        min_ranges = float("inf")  if len(ranges)==0  else np.min(ranges)
-        if min_ranges < self.collision_distance:
-            self.is_collided = True
-            rospy.loginfo_throttle(1, "robot collided:")
-        x = np.floor((self.width_laser_image/2.0 - (self.height_laser_image / self.max_laser_range) * np.multiply(np.cos(angle_increments), ranges))).astype(np.int)
-        y = np.floor((self.height_laser_image-1 - (self.height_laser_image / self.max_laser_range) * np.multiply(np.sin(angle_increments), ranges))).astype(np.int)
-        if len(x) > 0 and (np.max(x) >= self.width_laser_image or np.max(y) >= self.height_laser_image):
-            print ("problem, max x:{} max y:{}".format(np.max(x), np.max(y)))
-        scan_image = np.zeros((self.height_laser_image, self.width_laser_image), dtype=np.uint8)
-        scan_image[y, x] = 255
-        self.scan_image_history.add_element(scan_image)
-        self.scan_image = scan_image
-        # if "robot" in self.name:
-        #     cv.namedWindow("laser {}".format(self.name), cv.WINDOW_AUTOSIZE)
-        #     cv.imshow("laser {}".format(self.name), scan_image)
-        #     cv.waitKey(1)
 
     def position_cb(self, pos_msg):
         prev_pos = self.pos
@@ -377,43 +340,8 @@ class Robot():
             self.velocity_history[self.last_velocity_idx] = math.hypot(self.pos[1]-prev_pos[1], self.pos[0]-prev_pos[0]) / (self.pos[2]-prev_pos[2])
             self.last_velocity_idx = (self.last_velocity_idx + 1) % self.velocity_window
 
-    def init_services(self):
-        self.services = {}
 
-        trying = ['gps/enable', 'inertial_unit/enable', 'accelerometer/enable', 'gyro/enable', 'Sick_LMS_291/enable']
-        while len(trying) > 0:
-            failed = []
-            for name in trying:
-                self.services[name.split('/')[0]] = Service(self.robot_service_str + name, set_int)
-                try:
-                    self.services[name.split('/')[0]].call(1)
-                except Exception as e:
-                    rospy.loginfo(e,name+' called')
-                    failed.append(name)
-                    continue
-            trying = failed
-
-        for wheel in self.wheels_left+self.wheels_right:
-            # init motors; position to INFINITY to be able to use velocity
-            self.services[wheel+"_pos"] = Service(self.robot_service_str + wheel + '/set_position', set_float)
-            self.services[wheel + "_pos"].call(float('inf'))
-            # init velocity services for motors
-            self.services[wheel+"_vel"] = Service(self.robot_service_str + wheel + '/set_velocity', set_float)
-            self.services[wheel + "_vel"].call(0)
-    def __del__(self):
-        if self.deleted:
-            return
-        rospy.loginfo("removing robot: " + self.name)
-        try:
-            self.imu_sub.unregister()
-            self.pos_sub.unregister()
-            self.laser_sub.unregister()
-        except Exception as e:
-            rospy.logerr(e)
-        rospy.loginfo("removed: " + self.name)
-        self.deleted = True
-
-class WebotsEnv(gym.Env):
+class GazeboEnv(gym.Env):
 
     def pause(self):
         self.is_pause = True
@@ -439,7 +367,7 @@ class WebotsEnv(gym.Env):
             except Exception as e:
                 rospy.logerr(e)
                 rospy.loginfo("resseting because of exception (in get_person_position heading rel..)")
-                self.reset_webots()
+                self.reset_gazebo()
                 time.sleep(3)
 
         robot_pos = self.robot.get_pos()
@@ -573,7 +501,7 @@ class WebotsEnv(gym.Env):
         return self.get_laser_scan_all(), np.append(orientation_position, velocities)
 
     def __init__(self):
-        self.node = rospy.init_node("webots_env", anonymous=True)
+        self.node = rospy.init_node("gazebo_env", anonymous=True)
         # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
         self.use_goal = True
         self.supervisor = Supervisor()
@@ -588,7 +516,7 @@ class WebotsEnv(gym.Env):
         self.lock = _thread.allocate_lock()
         self.robot_mode = 0
 
-        self.reset_webots()
+        self.reset_gazebo()
         with self.lock:
             self.init_simulator()
 
@@ -627,12 +555,12 @@ class WebotsEnv(gym.Env):
         self.reward_range = [0, 2]
         self.is_reseting = False
 
-    def reset_webots(self):
-        subprocess.call('pkill -9 webots-bin', shell=True)
-        subprocess.call('tmux kill-session -t webots', shell=True)
-        subprocess.Popen(['tmux', 'new-session', '-d', '-s', 'webots'])
-        subprocess.Popen(['tmux', 'send-keys', '-t', 'webots', 'source ~/.bashrc', 'C-m'])
-        subprocess.Popen(['tmux', 'send-keys', '-t', "webots", "webots --mode=fast", "C-m"])
+    def reset_gazebo(self):
+        subprocess.call('pkill -9 gazebo-bin', shell=True)
+        subprocess.call('tmux kill-session -t gazebo', shell=True)
+        subprocess.Popen(['tmux', 'new-session', '-d', '-s', 'gazebo'])
+        subprocess.Popen(['tmux', 'send-keys', '-t', 'gazebo', 'source ~/.bashrc', 'C-m'])
+        subprocess.Popen(['tmux', 'send-keys', '-t', "gazebo", "gazebo --mode=fast", "C-m"])
         time.sleep(4)
         self.supervisor = Supervisor()
 
