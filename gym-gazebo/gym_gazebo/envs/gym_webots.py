@@ -41,6 +41,7 @@ class Manager:
             get_package_share_directory("turtlebot3_gazebo"), "models",
             "turtlebot3_burger", "model.sdf")
         self.node = rclpy.create_node("manager")
+        self.time = self.node.get_clock()
         self.node.get_logger().info(
             'Creating Service client_delete to connect to `/delete_entity`')
         self.client_delete = self.node.create_client(DeleteEntity, "/delete_entity")
@@ -48,6 +49,9 @@ class Manager:
         self.node.get_logger().info(
             'Creating Service client_spawn to connect to `/spawn_entity`')
         self.client_spawn = self.node.create_client(SpawnEntity, "/spawn_entity")
+
+    def get_time_sec(self):
+        return self.time.now().nanoseconds/1000000000.0
 
     def remove_object(self, name):
         self.node.get_logger().info("Connecting to `/delete_entity` service...")
@@ -105,15 +109,11 @@ class Manager:
     def reset(self):
         pass    
 
-rclpy.init() 
-manager = Manager()
-manager.create_robot("man", "man", (0,0.5,0.08), 30*math.pi/180.0)
-exit()
-
 class History():
-    def __init__(self, window_size, update_time):
+    def __init__(self, window_size, update_time, manager):
         self.data = [None for x in range(window_size)]
         self.idx = 0
+        self.manager = manager
         self.update_time = update_time
         self.last_update = 0
         self.window_size = window_size
@@ -129,8 +129,8 @@ class History():
             for idx in range (self.window_size):
                 self.data[idx] = element
         self.data[self.idx] = element
-        if rospy.Time.now().secs - self.last_update > self.update_time:
-            self.last_update = rospy.Time.now().secs
+        if self.manager.get_time_sec() - self.last_update > self.update_time:
+            self.last_update = self.manager.get_time_sec()
             self.update_idx = True
 
 
@@ -143,27 +143,29 @@ class History():
         return return_data
 
 class Robot():
-    def __init__(self, name, init_pos, angle, manager, max_speed=6.3, model='Pioneer3at'):
+    def __init__(self, name, init_pos, angle, manager, max_speed=6.3):
         manager.create_robot(name, name, init_pos, angle)
         self.name = name
-        self.node = rclpy.create_node(name)
+        self.manager = manager
+        self.node = manager.node
         self.deleted = False
         self.collision_distance = 0.5
-        self.max_speed = max_speed
+        self.max_angular_vel = 1
+        self.max_linear_vel = 1
         self.max_laser_range = 5.0 # meter
         self.width_laser_image = 100
         self.height_laser_image = 50
-        self.pos_history = History(5, 1)
+        self.pos_history = History(5, 1, manager)
         self.pos = (None, None)
-        self.cmd_vel_pub = node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
-        self.model_states_sub = node.create_subscription(ModelStates, '/model_states', self.states_cb, 1)
-        self.laser_sub = node.create_subscription(LaserScan, '/{}/scan',self.laser_cb, 1)
-        self.angular_pid = PID(0.75, 0, 0.01, setpoint=0)
-        self.linear_pid = PID(4, 0, 0.05, setpoint=0)
+        self.cmd_vel_pub = self.node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
+        self.model_states_sub = self.node.create_subscription(ModelStates, '/model_states', self.states_cb, 1)
+        self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name),self.laser_cb, 1)
+        self.angular_pid = PID(4, 0, 0.03, setpoint=0)
+        self.linear_pid = PID(1, 0, 0.05, setpoint=0)
         self.orientation = angle
-        self.orientation_history = History(5, 1)
+        self.orientation_history = History(5, 1, manager)
         self.scan_image = None
-        self.scan_image_history = History(5, 1)
+        self.scan_image_history = History(5, 1, manager)
         self.is_collided = False
         self.is_pause = False
         self.reset = False
@@ -181,16 +183,18 @@ class Robot():
         if model_idx is None:
             print ("cannot find {}".format(self.name))
             return
-         
-        pos = states_msg.pose[model_idx].pose 
+        pos = states_msg.pose[model_idx]
         self.pos = (pos.position.x, pos.position.y, pos.position.z)
+        euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
+        self.orientation = euler[0]
+        self.orientation_history.add_element(self.orientation)
+        
         self.pos_history.add_element(self.pos)
 
         # calculate velocity
         if prev_pos[0] is not None:
             self.velocity_history[self.last_velocity_idx] = math.hypot(self.pos[1]-prev_pos[1], self.pos[0]-prev_pos[0]) / (self.pos[2]-prev_pos[2])
             self.last_velocity_idx = (self.last_velocity_idx + 1) % self.velocity_window
-
 
 
     def laser_cb(self, laser_msg):
@@ -215,6 +219,7 @@ class Robot():
         self.scan_image = scan_image
 
     def get_velocity(self):
+        #TODO: get velocity from robot states
         return np.mean(self.velocity_history)
 
     def pause(self):
@@ -223,43 +228,41 @@ class Robot():
     def resume(self):
         self.is_pause = False
 
+    # action is two digit number the first one is linear_vel (out of 9) second one is angular_vel (our of 6) 
     def take_action(self, action):
         if self.is_pause:
             return
-        speed_left = 0
-        speed_right = 0
-        if action == 0:
-            pass # stop robot
-        elif action == 1:
-            speed_left = speed_right = self.max_speed
-        elif action == 2:
-            speed_left = speed_right = -self.max_speed
-        elif action == 3:
-            speed_left = self.max_speed
-            speed_right = -self.max_speed
-        elif action == 4:
-            speed_left = -self.max_speed
-            speed_right = self.max_speed
-        elif action == 5:
-            speed_left = self.max_speed/2
-            speed_right = self.max_speed/2
-        elif action == 6:
-            speed_left = self.max_speed/2
-            speed_right = -self.max_speed/2
-        elif action == 7:
-            speed_left = -self.max_speed/2
-            speed_right = self.max_speed/2
-
-        for wheel in self.wheels_left:
-            self.services[wheel + "_vel"].call(speed_left)
-        for wheel in self.wheels_right:
-            self.services[wheel + "_vel"].call(speed_right)
+        linear_vel = (action%10 - 4) * self.max_linear_vel / 5.0
+        angular_vel = (action//10 - 3) * self.max_angular_vel / 3.0 
+        print ("take action linear {} angular {}".format(linear_vel, angular_vel))
+        cmd_vel = Twist()
+        cmd_vel.linear.x = linear_vel
+        cmd_vel.angular.z = angular_vel
+        self.cmd_vel_pub.publish(cmd_vel)
+    #     angular_vel = 0
+    #     linear_vel = 0
+    #     if action == 0:
+    #         pass # stop robot
+    #     elif action == 1:
+    #         linear_vel = self.linear_max
+    #     elif action == 2:
+    #         linear_vel = -self.linear_max
+    #     elif action == 3:
+    #         angular_vel = self.angular_max
+    #     elif action == 4:
+    #         angular_vel = -self.angular_max
+    #     elif action == 5:
+    #         linear_vel = self.linear_max/3.0
+    #         angular_vel = -2*self.angular_max/3.0
+    #     elif action == 6:
+    #         linear_vel = self.linear_max/3.0
+    #         angular_vel = 2*self.angular_max/3.0
+    #     elif action == 7:
+    #         speed_left = self.max_speed/2
+    #         speed_right = self.max_speed/2
 
     def stop_robot(self):
-        for wheel in self.wheels_left:
-            self.services[wheel + "_vel"].call(0)
-        for wheel in self.wheels_right:
-            self.services[wheel + "_vel"].call(0)
+        self.cmd_vel_pub.publish(Twist())
 
     def angle_distance_to_point(self, pos):
         current_pos = self.get_pos()
@@ -284,25 +287,19 @@ class Robot():
             # else:
             #     diff_angle_prev = diff_angle
             # angular_vel = min(max(self.angular_pid(math.atan2(math.sin(angle-self.orientation), math.cos(angle-self.orientation)))*200, -self.max_speed/3),self.max_speed)
-            angular_vel = min(max(self.angular_pid(diff_angle)*3, -self.max_speed/2),self.max_speed/2)
-            linear_vel = min(max(self.linear_pid(-distance), -self.max_speed), self.max_speed)
-            # set speed left wheels
-            left_vel = linear_vel + angular_vel
-            right_vel = linear_vel - angular_vel
-            check_speed = max(abs(left_vel), abs(right_vel))
-            if check_speed > self.max_speed:
-                left_vel = left_vel * self.max_speed / check_speed
-                right_vel = right_vel * self.max_speed / check_speed
-
+            angular_vel = -min(max(self.angular_pid(diff_angle)*3, -self.max_angular_vel),self.max_angular_vel)
+            linear_vel = min(max(self.linear_pid(-distance), -self.max_linear_vel), self.max_linear_vel)
+            if abs(angular_vel) > self.max_angular_vel/2 and linear_vel > self.max_linear_vel/2:
+                linear_vel = linear_vel/4
             if self.reset:
                 return
-            for wheel in self.wheels_left:
-                self.services[wheel+"_vel"].call(left_vel)
-            for wheel in self.wheels_right:
-                self.services[wheel+"_vel"].call(right_vel)
-            # rospy.loginfo("angle: {} distance: {} vel: angular: {} linear: {} left: {} right: {} diff: {} orientation: {}"\
-            #     .format(np.rad2deg(angle), distance, angular_vel, linear_vel, left_vel, right_vel, np.rad2deg(diff_angle), np.rad2deg(self.orientation)))
+            cmd_vel = Twist()
+            print (linear_vel, angular_vel, distance, self.orientation*180/math.pi, diff_angle*180/math.pi)
+            cmd_vel.linear.x = float(linear_vel)
+            cmd_vel.angular.z = float(angular_vel)
+            self.cmd_vel_pub.publish(cmd_vel) 
             time.sleep(0.1)
+
         if stop_after_getting:
             self.stop_robot()
 
@@ -311,7 +308,7 @@ class Robot():
         while self.pos[0] is None:
             if self.reset:
                 return (None, None)
-            rospy.logwarn("waiting for pos to be available")
+            print("waiting for pos to be available")
             time.sleep(0.1)
             counter_problem += 1
             if counter_problem > 300:
@@ -341,6 +338,17 @@ class Robot():
             self.last_velocity_idx = (self.last_velocity_idx + 1) % self.velocity_window
 
 
+rclpy.init() 
+manager = Manager()
+robot = Robot("r1", (10,0,0.08), -140*math.pi/180.0, manager, max_speed=6.3)
+#robot.take_action(86)
+person_thread = threading.Thread(target=robot.go_to_pos, args=((+5,-15), True,))
+person_thread.start()
+while rclpy.ok():
+
+    rclpy.spin_once(manager.node)
+exit()
+
 class GazeboEnv(gym.Env):
 
     def pause(self):
@@ -365,8 +373,8 @@ class GazeboEnv(gym.Env):
                 robot_pos = self.robot.get_pos()
                 got_position = True
             except Exception as e:
-                rospy.logerr(e)
-                rospy.loginfo("resseting because of exception (in get_person_position heading rel..)")
+                print(e)
+                print("resseting because of exception (in get_person_position heading rel..)")
                 self.reset_gazebo()
                 time.sleep(3)
 
