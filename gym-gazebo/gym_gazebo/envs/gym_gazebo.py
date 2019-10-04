@@ -36,11 +36,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Manager:
-    def __init__(self):
+    def __init__(self, node):
         self.sdf_file_path = os.path.join(
             get_package_share_directory("turtlebot3_gazebo"), "models",
             "turtlebot3_burger", "model.sdf")
-        self.node = rclpy.create_node("manager")
+        self.node = node #rclpy.create_node("manager")
         self.time = self.node.get_clock()
         self.node.get_logger().info(
             'Creating Service client_delete to connect to `/delete_entity`')
@@ -88,7 +88,7 @@ class Manager:
         request.robot_namespace = name_space
         request.initial_pose.position.x = float(translation[0])
         request.initial_pose.position.y = float(translation[1])
-        request.initial_pose.position.z = float(translation[2])
+        request.initial_pose.position.z = 0.009
         # TODO: check euler angle
         quaternion_rotation = euler2quat(0, rotation, 0)
         print(quaternion_rotation)
@@ -158,8 +158,8 @@ class Robot():
         self.pos_history = History(5, 1, manager)
         self.pos = (None, None)
         self.cmd_vel_pub = self.node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
+        self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, 1)
         self.model_states_sub = self.node.create_subscription(ModelStates, '/model_states', self.states_cb, 1)
-        self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name),self.laser_cb, 1)
         self.angular_pid = PID(4, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1, 0, 0.05, setpoint=0)
         self.orientation = angle
@@ -196,8 +196,8 @@ class Robot():
             self.velocity_history[self.last_velocity_idx] = math.hypot(self.pos[1]-prev_pos[1], self.pos[0]-prev_pos[0]) / (self.pos[2]-prev_pos[2])
             self.last_velocity_idx = (self.last_velocity_idx + 1) % self.velocity_window
 
-
     def laser_cb(self, laser_msg):
+        self.node.logging.error("got laser")
         if self.reset:
             return
         angle_increments = np.arange(float(laser_msg.angle_min) - float(laser_msg.angle_min) , float(laser_msg.angle_max) - 0.001 - float(laser_msg.angle_min), float(laser_msg.angle_increment))
@@ -208,7 +208,7 @@ class Robot():
         min_ranges = float("inf")  if len(ranges)==0  else np.min(ranges)
         if min_ranges < self.collision_distance:
             self.is_collided = True
-            rospy.loginfo_throttle(1, "robot collided:")
+            self.node.get_logger().info("robot collided:")
         x = np.floor((self.width_laser_image/2.0 - (self.height_laser_image / self.max_laser_range) * np.multiply(np.cos(angle_increments), ranges))).astype(np.int)
         y = np.floor((self.height_laser_image-1 - (self.height_laser_image / self.max_laser_range) * np.multiply(np.sin(angle_increments), ranges))).astype(np.int)
         if len(x) > 0 and (np.max(x) >= self.width_laser_image or np.max(y) >= self.height_laser_image):
@@ -294,7 +294,6 @@ class Robot():
             if self.reset:
                 return
             cmd_vel = Twist()
-            print (linear_vel, angular_vel, distance, self.orientation*180/math.pi, diff_angle*180/math.pi)
             cmd_vel.linear.x = float(linear_vel)
             cmd_vel.angular.z = float(angular_vel)
             self.cmd_vel_pub.publish(cmd_vel) 
@@ -308,7 +307,7 @@ class Robot():
         while self.pos[0] is None:
             if self.reset:
                 return (None, None)
-            print("waiting for pos to be available")
+            self.node.get_logger().warn("waiting for pos to be available")
             time.sleep(0.1)
             counter_problem += 1
             if counter_problem > 300:
@@ -337,19 +336,80 @@ class Robot():
             self.velocity_history[self.last_velocity_idx] = math.hypot(self.pos[1]-prev_pos[1], self.pos[0]-prev_pos[0]) / (self.pos[2]-prev_pos[2])
             self.last_velocity_idx = (self.last_velocity_idx + 1) % self.velocity_window
 
-
-rclpy.init() 
-manager = Manager()
-robot = Robot("r1", (10,0,0.08), -140*math.pi/180.0, manager, max_speed=6.3)
-#robot.take_action(86)
-person_thread = threading.Thread(target=robot.go_to_pos, args=((+5,-15), True,))
-person_thread.start()
-while rclpy.ok():
-
-    rclpy.spin_once(manager.node)
-exit()
-
+#robot = Robot("r1", (10,0,0.08), -140*math.pi/180.0, manager, max_speed=6.3)
+##robot.take_action(86)
+#person_thread = threading.Thread(target=robot.go_to_pos, args=((+5,-15), True,))
+#person_thread.start()
 class GazeboEnv(gym.Env):
+
+    def __init__(self):
+        rclpy.init() 
+        self.node = rclpy.create_node("gazebo_env")
+        # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
+        self.use_goal = True
+        self.manager = Manager(self.node)
+        # read the path for robot
+        self.path = []
+        try:
+            with open('data/first', 'rb') as f:
+                self.path = pickle.load(f)
+        except Exception as e:
+            print(e)
+        self.is_reseting = True
+        self.lock = _thread.allocate_lock()
+        self.robot_mode = 0
+
+        #self.reset_gazebo()
+        with self.lock:
+            self.init_simulator()
+
+        self.spin_thread = threading.Thread(target=self.spin, args=())
+        self.spin_thread.start()
+
+    def spin(self):
+        while rclpy.ok():
+            rclpy.spin(self.node)
+
+
+    def init_simulator(self):
+        
+        self.is_pause = True
+        idx_start = random.randint(0, len(self.path)-20)
+        self.current_path_idx = idx_start
+
+        init_pos_person = self.path[idx_start]
+        angle_person = self.calculate_angle_using_path(idx_start)
+        idx_robot = idx_start + 1
+        while (math.hypot (self.path[idx_robot][1] - self.path[idx_start][1], self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
+            idx_robot += 1
+        angle_robot = self.calculate_angle_using_path(idx_robot)
+        self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, manager=self.manager)
+        self.person = Robot('person', init_pos=self.path[idx_start],  max_speed=4, angle=angle_person, manager=self.manager)
+
+        self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start, self.robot,))
+        # while True:
+        #     print(self.get_angle_person_robot())
+        #     time.sleep(0.5)
+
+        self.observation_space = gym.spaces.Tuple(
+                (
+                    gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
+                    gym.spaces.Box(low=0, high=1, shape=(17,))
+                )
+            )
+        # Action space omits the Tackle/Catch actions, which are useful
+        # on defense
+        self.action_space = gym.spaces.Discrete(69)
+        self.min_distance = 1
+        self.max_distance = 2.5
+        self.number_of_steps = 0
+        self.max_numb_steps = 200
+        self.reward_range = [0, 2]
+        self.is_reseting = False
+        
+        # TODO: comment this after start agent
+        # self.resume_simulator()
+
 
     def pause(self):
         self.is_pause = True
@@ -373,9 +433,7 @@ class GazeboEnv(gym.Env):
                 robot_pos = self.robot.get_pos()
                 got_position = True
             except Exception as e:
-                print(e)
-                print("resseting because of exception (in get_person_position heading rel..)")
-                self.reset_gazebo()
+                self.node.get_logger.error(" because of exception (in get_person_position heading rel..), {}".format(e))
                 time.sleep(3)
 
         robot_pos = self.robot.get_pos()
@@ -383,7 +441,7 @@ class GazeboEnv(gym.Env):
         person_orientation_history = self.person.orientation_history.get_elemets()
 
         while len(person_pos_history) != self.person.pos_history.window_size or len(person_orientation_history) != self.person.orientation_history.window_size:
-            rospy.logwarn_throttle (1, "waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
+            self.node.get_logger().warn ("waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
             robot_pos = self.robot.get_pos()
             person_pos_history = self.person.pos_history.get_elemets()
             person_orientation_history = self.person.orientation_history.get_elemets()
@@ -419,16 +477,16 @@ class GazeboEnv(gym.Env):
     def path_follower(self, person, idx_start, robot):
         while self.is_reseting:
             time.sleep(0.1)
-            rospy.loginfo_throttle(1, "path follower waiting for reset to be false")
+            self.node.get_logger().info( "path follower waiting for reset to be false")
         with self.lock:
-            rospy.loginfo("path follower got the lock")
+            self.node.get_logger().info("path follower got the lock")
             for idx in range (idx_start, len(self.path)-3):
                 point = self.path[idx]
                 self.current_path_idx = idx
                 counter_pause = 0
                 while self.is_pause:
                     counter_pause+=1
-                    rospy.loginfo("pause in path follower")
+                    self.node.get_logger().info("pause in path follower")
                     if self.is_reseting or counter_pause > 200:
                         return
                     time.sleep(0.1)
@@ -445,14 +503,13 @@ class GazeboEnv(gym.Env):
                     person_thread.join()
 
                 except Exception as e:
-                    print(e)
-                    rospy.logwarn("path follower {}".format(self.is_reseting))
+                    self.node.get_logger().warn("path follower {}, {}".format(self.is_reseting, e))
                     break
-                rospy.loginfo("got to point: {} out of {}".format(idx - idx_start, len(self.path) - idx_start ))
+                self.node.get_logger().info("got to point: {} out of {}".format(idx - idx_start, len(self.path) - idx_start ))
                 if self.is_reseting:
                     person.stop_robot()
                     break
-        rospy.loginfo("path follower release the lock")
+        self.node.get_logger().info("path follower release the lock")
         # robot.stop_robot()
 
     def get_laser_scan(self):
@@ -462,7 +519,7 @@ class GazeboEnv(gym.Env):
         images = self.robot.scan_image_history.get_elemets()
         while len(images)!=self.robot.scan_image_history.window_size:
             images = self.robot.scan_image_history.get_elemets()
-            rospy.logwarn_throttle(1, "wait for laser scan to get filled")
+            self.node.get_logger().warn("wait for laser scan to get filled")
             time.sleep(0.1)
         images = np.asarray(images)
 
@@ -481,7 +538,6 @@ class GazeboEnv(gym.Env):
 
     def visualize_observation(self, poses, headings, laser_scans):
         image = np.zeros((500, 500, 3))
-        print (poses)
         for idx in range(len(poses)):
             pt1 = (poses[idx][0] * 50 + 250, poses[idx][1] * 50 + 250)
             pt2 = (pt1[0] + math.cos(headings[idx]) * 30, pt1[1] + math.sin(headings[idx]) * 30)
@@ -508,61 +564,6 @@ class GazeboEnv(gym.Env):
 
         return self.get_laser_scan_all(), np.append(orientation_position, velocities)
 
-    def __init__(self):
-        self.node = rospy.init_node("gazebo_env", anonymous=True)
-        # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
-        self.use_goal = True
-        self.supervisor = Supervisor()
-        # read the path for robot
-        self.path = []
-        try:
-            with open('data/first', 'rb') as f:
-                self.path = pickle.load(f)
-        except Exception as e:
-            print(e)
-        self.is_reseting = True
-        self.lock = _thread.allocate_lock()
-        self.robot_mode = 0
-
-        self.reset_gazebo()
-        with self.lock:
-            self.init_simulator()
-
-    def init_simulator(self):
-        self.is_pause = True
-        idx_start = random.randint(0, len(self.path)-20)
-        self.current_path_idx = idx_start
-
-        init_pos_person = self.path[idx_start]
-        angle_person = self.calculate_angle_using_path(idx_start)
-        idx_robot = idx_start + 1
-        while (math.hypot (self.path[idx_robot][1] - self.path[idx_start][1], self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
-            idx_robot += 1
-        angle_robot = self.calculate_angle_using_path(idx_robot)
-        self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, supervisor=self.supervisor)
-        self.person = Robot('person', init_pos=self.path[idx_start],  max_speed=4, angle=angle_person, supervisor=self.supervisor)
-
-        self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start, self.robot,))
-        # while True:
-        #     print(self.get_angle_person_robot())
-        #     time.sleep(0.5)
-
-        self.observation_space = gym.spaces.Tuple(
-                (
-                    gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
-                    gym.spaces.Box(low=0, high=1, shape=(17,))
-                )
-            )
-        # Action space omits the Tackle/Catch actions, which are useful
-        # on defense
-        self.action_space = gym.spaces.Discrete(8)
-        self.min_distance = 1
-        self.max_distance = 2.5
-        self.number_of_steps = 0
-        self.max_numb_steps = 200
-        self.reward_range = [0, 2]
-        self.is_reseting = False
-
     def reset_gazebo(self):
         subprocess.call('pkill -9 gazebo-bin', shell=True)
         subprocess.call('tmux kill-session -t gazebo', shell=True)
@@ -570,7 +571,7 @@ class GazeboEnv(gym.Env):
         subprocess.Popen(['tmux', 'send-keys', '-t', 'gazebo', 'source ~/.bashrc', 'C-m'])
         subprocess.Popen(['tmux', 'send-keys', '-t', "gazebo", "gazebo --mode=fast", "C-m"])
         time.sleep(4)
-        self.supervisor = Supervisor()
+        self.manager = Manager()
 
     def __del__(self):
         # todo
@@ -599,7 +600,7 @@ class GazeboEnv(gym.Env):
             episode_over = True
             print('max number of steps episode over')
         reward = min(max(reward, -1), 1)
-        rospy.loginfo("reward: {} ".format(reward))
+        self.node.get_logger().info("reward: {} ".format(reward))
         reward += 1
         return ob, reward, episode_over, {}
 
@@ -667,9 +668,9 @@ class GazeboEnv(gym.Env):
         self.is_reseting = True
         self.robot.reset = True
         self.person.reset = True
-        rospy.loginfo("trying to get the lock")
+        self.node.get_logger().info("trying to get the lock")
         with self.lock:
-            rospy.loginfo("got the lock")
+            self.node.get_logger().info("got the lock")
             self.robot.__del__()
             self.person.__del__()
             self.init_simulator()
@@ -680,3 +681,17 @@ class GazeboEnv(gym.Env):
     def render(self, mode='human', close=False):
         """ Viewer only supports human mode currently. """
         return
+
+# gazebo = GazeboEnv()
+
+def test_env():
+    rclpy.init()
+    node = rclpy.create_node("gazebo_env")
+    manager = Manager(node)
+    robot = Robot('my_robot', init_pos=(4,4,4),  angle=0, manager=manager)
+    while rclpy.ok():
+        
+        rclpy.spin_once(node)
+    exit()
+
+test_env()

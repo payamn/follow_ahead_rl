@@ -27,9 +27,9 @@ from launch.substitutions import ThisLaunchFileDir
 
 
 def generate_launch_description():
-    world_file_name = 'turtlebot3_worlds/' +'burger' + '.model'
-    world = os.path.join(get_package_share_directory('turtlebot3_gazebo'), 'worlds', world_file_name)
-
+    # world_file_name = 'turtlebot3_worlds/' +'burger' + '.model'
+    # world = os.path.join(get_package_share_directory('turtlebot3_gazebo'), 'worlds', world_file_name)
+    world = os.path.join("/home/payam/ros2_ws/src/follow_ahead_rl/worlds/", "empty.model")
     return LaunchDescription([
         DeclareLaunchArgument('gui', default_value='true',
                               description='Set to "false" to run headless.'),

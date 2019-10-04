@@ -1,6 +1,6 @@
 import gym
 import os
-import gym_webots
+import gym_gazebo
 import logging
 import numpy as np
 import tensorflow as tf
@@ -107,6 +107,7 @@ class A2CAgent:
         observations = [np.empty((batch_sz,) + env.observation_space[0].shape ),
                         np.empty((batch_sz,) + env.observation_space[1].shape)]
         ep_rews = [0.0]
+        env.resume_simulator()
         next_obs = env.get_observation()
         best_losses = float('inf')
         first = True
@@ -210,8 +211,9 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     logging.getLogger().setLevel(logging.INFO)
-
-    env = gym.make('webots-v0')
+    print ("before env")
+    env = gym.make('gazebo-v0')
+    print ("after env")
     model = Model(num_actions=env.action_space.n)
 
     if args.weight is not None and os.path.exists(args.weight+".index"):
