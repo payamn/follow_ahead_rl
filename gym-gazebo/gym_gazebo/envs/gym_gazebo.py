@@ -20,6 +20,7 @@ from ament_index_python.packages import get_package_share_directory
 
 from gazebo_msgs.srv import SpawnEntity
 from gazebo_msgs.srv import DeleteEntity
+from std_srvs.srv import Empty
 
 from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Twist
@@ -36,11 +37,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Manager:
-    def __init__(self, node):
+    def __init__(self):
+        self.lock_spin = _thread.allocate_lock()
         self.sdf_file_path = os.path.join(
             get_package_share_directory("turtlebot3_gazebo"), "models",
             "turtlebot3_burger", "model.sdf")
-        self.node = node #rclpy.create_node("manager")
+        self.node = rclpy.create_node("manager")
         self.time = self.node.get_clock()
         self.node.get_logger().info(
             'Creating Service client_delete to connect to `/delete_entity`')
@@ -49,24 +51,54 @@ class Manager:
         self.node.get_logger().info(
             'Creating Service client_spawn to connect to `/spawn_entity`')
         self.client_spawn = self.node.create_client(SpawnEntity, "/spawn_entity")
+        self.client_pause = self.node.create_client(Empty, "/pause_physics")
+        self.client_unpause = self.node.create_client(Empty, "/unpause_physics")
+
+    def cleanup(self):
+        self.node.destroy_client(self.client_delete )
+        self.node.destroy_client(self.client_spawn)
+        self.node.destroy_node()
 
     def get_time_sec(self):
         return self.time.now().nanoseconds/1000000000.0
 
-    def remove_object(self, name):
-        self.node.get_logger().info("Connecting to `/delete_entity` service...")
-        if not self.client_delete.service_is_ready():
-            self.client_delete.wait_for_service()
+    def pause(self):
+        self.node.get_logger().info("Connecting to `/client_pause` service...")
+        if not self.client_pause.service_is_ready():
+            self.client_pause.wait_for_service(timeout_sec=8)
             self.node.get_logger().info("...connected!")
 
+        request = Empty.Request()
+        future = self.client_pause.call_async(request)
+        self.node.get_logger().info("Connecting to `/client_pause` service...")
+        with self.lock_spin:
+            self.node.get_logger().info("Sending service request to `/client_pause`")
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=2)
 
+    def unpause(self):
+        self.node.get_logger().info("Connecting to `/client_unpause` service...")
+        if not self.client_unpause.service_is_ready():
+            self.client_unpause.wait_for_service(timeout_sec=8)
+            self.node.get_logger().info("...connected!")
+
+        request = Empty.Request()
+        future =  self.client_unpause.call_async(request)
+        with self.lock_spin:
+            self.node.get_logger().info("Sending service request to `/client_unpause`")
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=2)
+    def remove_object(self, name):
+        self.pause()
+        if not self.client_delete.service_is_ready():
+            self.client_delete.wait_for_service(timeout_sec=8)
+            self.node.get_logger().info("...connected!")
         # Set data for request
         request = DeleteEntity.Request()
         request.name = name
-
-        self.node.get_logger().info("Sending service request to `/delete_entity`")
         future = self.client_delete.call_async(request)
-        rclpy.spin_until_future_complete(self.node, future)
+        self.unpause()
+        with self.lock_spin:
+            self.node.get_logger().info("Sending service request to `/delete_entity`")
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=2)
         if future.result() is not None:
             print('response: %r' % future.result())
         else:
@@ -74,12 +106,11 @@ class Manager:
                 'exception while calling service: %r' % future.exception())
 
     def create_robot(self, name, name_space, translation, rotation):
-        self.remove_object(name)
+        # self.remove_object(name)
         self.node.get_logger().info("Connecting to `/spawn_entity` service...")
         if not self.client_spawn.service_is_ready():
-            self.client_spawn.wait_for_service()
+            self.client_spawn.wait_for_service(timeout_sec=8)
             self.node.get_logger().info("...connected!")
-
 
         # Set data for request
         request = SpawnEntity.Request()
@@ -97,9 +128,10 @@ class Manager:
         request.initial_pose.orientation.z = quaternion_rotation[2]
         request.initial_pose.orientation.w = quaternion_rotation[0]
 
-        self.node.get_logger().info("Sending service request to `/spawn_entity`")
         future = self.client_spawn.call_async(request)
-        rclpy.spin_until_future_complete(self.node, future)
+        with self.lock_spin:
+            self.node.get_logger().info("Sending service request to `/spawn_entity`")
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=2)
         if future.result() is not None:
             print('response: %r' % future.result())
         else:
@@ -143,23 +175,29 @@ class History():
         return return_data
 
 class Robot():
-    def __init__(self, name, init_pos, angle, manager, max_speed=6.3):
+    def __init__(self, name, init_pos, angle, manager, node, max_angular_speed=1, max_linear_speed=1):
         manager.create_robot(name, name, init_pos, angle)
+        #time.sleep(5)
         self.name = name
         self.manager = manager
-        self.node = manager.node
+        self.init_node = False
+        self.node = rclpy.create_node(name)
+        # self.node = node
+        self.init_node = True
         self.deleted = False
         self.collision_distance = 0.5
-        self.max_angular_vel = 1
-        self.max_linear_vel = 1
+        self.max_angular_vel = max_angular_speed
+        self.max_linear_vel = max_linear_speed
         self.max_laser_range = 5.0 # meter
         self.width_laser_image = 100
         self.height_laser_image = 50
         self.pos_history = History(5, 1, manager)
         self.pos = (None, None)
+        qosProfileSensors = rclpy.qos.qos_profile_sensor_data
+        
         self.cmd_vel_pub = self.node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
-        self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, 1)
-        self.model_states_sub = self.node.create_subscription(ModelStates, '/model_states', self.states_cb, 1)
+        self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, qos_profile=qosProfileSensors)
+        self.model_states_sub = self.node.create_subscription(ModelStates, '/model_states', self.states_cb, qos_profile=qosProfileSensors)
         self.angular_pid = PID(4, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1, 0, 0.05, setpoint=0)
         self.orientation = angle
@@ -173,11 +211,34 @@ class Robot():
         self.velocity_history = np.zeros((self.velocity_window))
         self.last_velocity_idx = 0
 
+        self.spin_thread = threading.Thread(target=self.spin, args=())
+        self.spin_thread.start()
+
+
+    def spin(self):
+        while not self.reset:
+            with self.manager.lock_spin:
+                rclpy.spin_once(self.node)
+                time.sleep(0.01)
+
+    def remove(self):
+        # self.laser_sub.destroy()
+        # self.model_states_sub.destroy()
+        self.node.destroy_subscription(self.model_states_sub)
+        self.node.destroy_subscription(self.laser_sub)
+        # self.node.destroy_node()
+        # self.laser_sub.destroy()
+        # self.model_states_sub.destroy()
+        self.manager.remove_object(self.name)
+        self.spin_thread.join()
+        self.node.destroy_node()
+
     def states_cb(self, states_msg):
         model_idx = None
         prev_pos = self.pos
         for i in range (len(states_msg.name)):
             if states_msg.name[i] == self.name:
+                # self.node.get_logger().warn("statecb")
                 model_idx = i
                 break
         if model_idx is None:
@@ -197,11 +258,15 @@ class Robot():
             self.last_velocity_idx = (self.last_velocity_idx + 1) % self.velocity_window
 
     def laser_cb(self, laser_msg):
-        self.node.logging.error("got laser")
+
+        # print("laser cb")
         if self.reset:
             return
         angle_increments = np.arange(float(laser_msg.angle_min) - float(laser_msg.angle_min) , float(laser_msg.angle_max) - 0.001 - float(laser_msg.angle_min), float(laser_msg.angle_increment))
         ranges = np.asarray(laser_msg.ranges, dtype=float)
+        if angle_increments.shape[0] != ranges.shape[0]:
+            angle_increments = angle_increments[:min(angle_increments.shape[0], ranges.shape[0])]
+            ranges = ranges[:min(angle_increments.shape[0], ranges.shape[0])]
         remove_index = np.append(np.argwhere(ranges >= self.max_laser_range), np.argwhere(ranges <= laser_msg.range_min))
         angle_increments = np.delete(angle_increments, remove_index)
         ranges = np.delete(ranges, remove_index)
@@ -209,10 +274,10 @@ class Robot():
         if min_ranges < self.collision_distance:
             self.is_collided = True
             self.node.get_logger().info("robot collided:")
-        x = np.floor((self.width_laser_image/2.0 - (self.height_laser_image / self.max_laser_range) * np.multiply(np.cos(angle_increments), ranges))).astype(np.int)
+        x = np.floor((self.width_laser_image/2.0 - (self.width_laser_image / 2 / self.max_laser_range) * np.multiply(np.cos(angle_increments), ranges))).astype(np.int)
         y = np.floor((self.height_laser_image-1 - (self.height_laser_image / self.max_laser_range) * np.multiply(np.sin(angle_increments), ranges))).astype(np.int)
         if len(x) > 0 and (np.max(x) >= self.width_laser_image or np.max(y) >= self.height_laser_image):
-            print ("problem, max x:{} max y:{}".format(np.max(x), np.max(y)))
+            print("problem, max x:{} max y:{}".format(np.max(x), np.max(y)))
         scan_image = np.zeros((self.height_laser_image, self.width_laser_image), dtype=np.uint8)
         scan_image[y, x] = 255
         self.scan_image_history.add_element(scan_image)
@@ -224,6 +289,7 @@ class Robot():
 
     def pause(self):
         self.is_pause = True
+        self.stop_robot()
 
     def resume(self):
         self.is_pause = False
@@ -277,7 +343,10 @@ class Robot():
         distance = 2
         # diff_angle_prev = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
         while not distance < 1.5:
-            if self.is_pause or self.reset:
+            if self.is_pause:
+                self.stop_robot()
+                return
+            if self.reset:
                 return
             diff_angle, distance = self.angle_distance_to_point(pos)
             if distance is None:
@@ -303,15 +372,15 @@ class Robot():
             self.stop_robot()
 
     def get_pos(self):
-        counter_problem = 0
+        # counter_problem = 0
         while self.pos[0] is None:
             if self.reset:
                 return (None, None)
             self.node.get_logger().warn("waiting for pos to be available")
             time.sleep(0.1)
-            counter_problem += 1
-            if counter_problem > 300:
-                raise Exception('Probable shared memory issue happend')
+            # counter_problem += 1
+            # if counter_problem > 300:
+            #     raise Exception('Probable shared memory issue happend')
 
         return self.pos[:2]
 
@@ -345,9 +414,11 @@ class GazeboEnv(gym.Env):
     def __init__(self):
         rclpy.init() 
         self.node = rclpy.create_node("gazebo_env")
-        # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
         self.use_goal = True
-        self.manager = Manager(self.node)
+        self.reset_gazebo(no_manager=True)
+        self.manager = Manager()
+
+        # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
         # read the path for robot
         self.path = []
         try:
@@ -359,20 +430,21 @@ class GazeboEnv(gym.Env):
         self.lock = _thread.allocate_lock()
         self.robot_mode = 0
 
-        #self.reset_gazebo()
         with self.lock:
             self.init_simulator()
 
-        self.spin_thread = threading.Thread(target=self.spin, args=())
-        self.spin_thread.start()
+        # self.spin_thread = threading.Thread(target=self.spin, args=())
+        # self.spin_thread.start()
 
     def spin(self):
         while rclpy.ok():
-            rclpy.spin(self.node)
-
+            while self.is_reseting:
+                time.sleep(0.1)
+            rclpy.spin_once(self.node)
+            time.sleep(0.01)
 
     def init_simulator(self):
-        
+
         self.is_pause = True
         idx_start = random.randint(0, len(self.path)-20)
         self.current_path_idx = idx_start
@@ -383,9 +455,10 @@ class GazeboEnv(gym.Env):
         while (math.hypot (self.path[idx_robot][1] - self.path[idx_start][1], self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
             idx_robot += 1
         angle_robot = self.calculate_angle_using_path(idx_robot)
-        self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, manager=self.manager)
-        self.person = Robot('person', init_pos=self.path[idx_start],  max_speed=4, angle=angle_person, manager=self.manager)
-
+        # self.manager.pause()
+        self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, manager=self.manager, node=self.node, max_angular_speed=1.6, max_linear_speed=1.6)
+        self.person = Robot('person', init_pos=self.path[idx_start],  angle=angle_person, manager=self.manager, node=self.node,  max_angular_speed=1.4, max_linear_speed=.9)
+        # self.manager.unpause()
         self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start, self.robot,))
         # while True:
         #     print(self.get_angle_person_robot())
@@ -564,14 +637,16 @@ class GazeboEnv(gym.Env):
 
         return self.get_laser_scan_all(), np.append(orientation_position, velocities)
 
-    def reset_gazebo(self):
-        subprocess.call('pkill -9 gazebo-bin', shell=True)
+    def reset_gazebo(self, no_manager=False):
+        subprocess.call('pkill -9 gzclient', shell=True)
         subprocess.call('tmux kill-session -t gazebo', shell=True)
         subprocess.Popen(['tmux', 'new-session', '-d', '-s', 'gazebo'])
         subprocess.Popen(['tmux', 'send-keys', '-t', 'gazebo', 'source ~/.bashrc', 'C-m'])
-        subprocess.Popen(['tmux', 'send-keys', '-t', "gazebo", "gazebo --mode=fast", "C-m"])
+        subprocess.Popen(['tmux', 'send-keys', '-t', "gazebo", "ros2 launch /home/payam/ros2_ws/src/follow_ahead_rl/worlds/gazebo.launch.py", "C-m"])
         time.sleep(4)
-        self.manager = Manager()
+        if not no_manager:
+            self.manager.cleanup()
+            self.manager = Manager()
 
     def __del__(self):
         # todo
@@ -671,8 +746,14 @@ class GazeboEnv(gym.Env):
         self.node.get_logger().info("trying to get the lock")
         with self.lock:
             self.node.get_logger().info("got the lock")
-            self.robot.__del__()
-            self.person.__del__()
+            try:
+                # self.manager.pause()
+                self.robot.remove()
+                self.person.remove()
+                # self.manager.unpause()
+            except RuntimeError as r:
+                self.reset_gazebo()
+                # self.manager.unpause()
             self.init_simulator()
         """ Repeats NO-OP action until a new episode begins. """
 
@@ -687,11 +768,11 @@ class GazeboEnv(gym.Env):
 def test_env():
     rclpy.init()
     node = rclpy.create_node("gazebo_env")
-    manager = Manager(node)
+    manager = Manager()
     robot = Robot('my_robot', init_pos=(4,4,4),  angle=0, manager=manager)
     while rclpy.ok():
         
         rclpy.spin_once(node)
     exit()
 
-test_env()
+# test_env()
