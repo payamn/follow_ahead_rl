@@ -65,15 +65,14 @@ class Manager:
     def pause(self):
         self.node.get_logger().info("Connecting to `/client_pause` service...")
         if not self.client_pause.service_is_ready():
-            self.client_pause.wait_for_service(timeout_sec=8)
+            self.client_pause.wait_for_service(     t_sec=8)
             self.node.get_logger().info("...connected!")
 
         request = Empty.Request()
         future = self.client_pause.call_async(request)
-        self.node.get_logger().info("Connecting to `/client_pause` service...")
         with self.lock_spin:
             self.node.get_logger().info("Sending service request to `/client_pause`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=2)
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=4)
 
     def unpause(self):
         self.node.get_logger().info("Connecting to `/client_unpause` service...")
@@ -85,7 +84,7 @@ class Manager:
         future =  self.client_unpause.call_async(request)
         with self.lock_spin:
             self.node.get_logger().info("Sending service request to `/client_unpause`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=2)
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=4)
     def remove_object(self, name):
         self.pause()
         if not self.client_delete.service_is_ready():
@@ -98,7 +97,7 @@ class Manager:
         self.unpause()
         with self.lock_spin:
             self.node.get_logger().info("Sending service request to `/delete_entity`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=2)
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=4)
         if future.result() is not None:
             print('response: %r' % future.result())
         else:
@@ -131,7 +130,7 @@ class Manager:
         future = self.client_spawn.call_async(request)
         with self.lock_spin:
             self.node.get_logger().info("Sending service request to `/spawn_entity`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=2)
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=4)
         if future.result() is not None:
             print('response: %r' % future.result())
         else:
@@ -198,7 +197,7 @@ class Robot():
         self.cmd_vel_pub = self.node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
         self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, qos_profile=qosProfileSensors)
         self.model_states_sub = self.node.create_subscription(ModelStates, '/model_states', self.states_cb, qos_profile=qosProfileSensors)
-        self.angular_pid = PID(4, 0, 0.03, setpoint=0)
+        self.angular_pid = PID(1, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1, 0, 0.05, setpoint=0)
         self.orientation = angle
         self.orientation_history = History(5, 1, manager)
@@ -219,7 +218,7 @@ class Robot():
         while not self.reset:
             with self.manager.lock_spin:
                 rclpy.spin_once(self.node)
-                time.sleep(0.01)
+            time.sleep(0.01)
 
     def remove(self):
         # self.laser_sub.destroy()
@@ -754,7 +753,15 @@ class GazeboEnv(gym.Env):
             except RuntimeError as r:
                 self.reset_gazebo()
                 # self.manager.unpause()
-            self.init_simulator()
+            not_init = True
+            while not_init:
+                try:
+                    self.init_simulator()
+                    not_init = False
+                except RuntimeError as e:
+                    self.node.get_logger().error("error happend reseting: {}".format(e))
+                    self.reset_gazebo()
+
         """ Repeats NO-OP action until a new episode begins. """
 
         return self.get_observation()
