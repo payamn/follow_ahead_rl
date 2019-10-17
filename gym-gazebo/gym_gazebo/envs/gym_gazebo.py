@@ -39,9 +39,11 @@ logger = logging.getLogger(__name__)
 class Manager:
     def __init__(self):
         self.lock_spin = _thread.allocate_lock()
-        self.sdf_file_path = os.path.join(
-            get_package_share_directory("turtlebot3_gazebo"), "models",
-            "turtlebot3_burger", "model.sdf")
+        
+        # self.sdf_file_path = os.path.join(
+        #     get_package_share_directory("turtlebot3_gazebo"), "models",
+        #     "turtlebot3_burger", "model.sdf")
+        self.sdf_file_path = os.path.join("/home/payam/ros2_ws/src/follow_ahead_rl/worlds/", "turtlebot3_burger", "model.sdf")
         self.node = rclpy.create_node("manager")
         self.time = self.node.get_clock()
         self.node.get_logger().info(
