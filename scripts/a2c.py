@@ -220,6 +220,7 @@ if __name__ == '__main__':
 
     if args.weight is not None and os.path.exists(args.weight+".index"):
         model.load_weights(args.weight)
+        print("weight loaded:", args.weight)
     else:
         print("weight not loaded:", args.weight)
 

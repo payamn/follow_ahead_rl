@@ -65,14 +65,27 @@ class Manager:
     def pause(self):
         self.node.get_logger().info("Connecting to `/client_pause` service...")
         if not self.client_pause.service_is_ready():
-            self.client_pause.wait_for_service(     t_sec=8)
+            self.client_pause.wait_for_service(timeout_sec=8)
             self.node.get_logger().info("...connected!")
 
         request = Empty.Request()
         future = self.client_pause.call_async(request)
-        with self.lock_spin:
-            self.node.get_logger().info("Sending service request to `/client_pause`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=4)
+        num_try=0
+        while num_try<2:
+            with self.lock_spin:
+                num_try += 1
+                self.node.get_logger().info("Sending service request to `/client_pause`")
+                rclpy.spin_until_future_complete(self.node, future, timeout_sec=8)
+                if future is not None:
+                    print ("paused")
+                    return
+                else:
+                    self.node.get_logger().error("not pause try again ")
+        raise RuntimeError(
+                'exception while calling service: %r' % future.exception())
+
+
+
 
     def unpause(self):
         self.node.get_logger().info("Connecting to `/client_unpause` service...")
@@ -82,9 +95,21 @@ class Manager:
 
         request = Empty.Request()
         future =  self.client_unpause.call_async(request)
-        with self.lock_spin:
-            self.node.get_logger().info("Sending service request to `/client_unpause`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=4)
+        num_try=0
+        while num_try<2:
+            num_try+=1
+            with self.lock_spin:
+                self.node.get_logger().info("Sending service request to `/client_unpause`")
+                rclpy.spin_until_future_complete(self.node, future, timeout_sec=9)
+                if future is not None:
+                    print ("unpaused")
+                    return
+                else:
+                    self.node.get_logger().error("not pause try again ")
+        raise RuntimeError(
+                'exception while calling service: %r' % future.exception())
+
+
     def remove_object(self, name):
         self.pause()
         if not self.client_delete.service_is_ready():
@@ -97,11 +122,18 @@ class Manager:
         self.unpause()
         with self.lock_spin:
             self.node.get_logger().info("Sending service request to `/delete_entity`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=4)
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=5)
         if future.result() is not None:
             print('response: %r' % future.result())
         else:
-            raise RuntimeError(
+            
+            self.node.get_logger().info("Sending second call service request to `/delete_entity`")
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=6)
+
+            if future.result() is not None:
+                print('second response: %r' % future.result())
+            else:    
+                raise RuntimeError(
                 'exception while calling service: %r' % future.exception())
 
     def create_robot(self, name, name_space, translation, rotation):
@@ -130,7 +162,7 @@ class Manager:
         future = self.client_spawn.call_async(request)
         with self.lock_spin:
             self.node.get_logger().info("Sending service request to `/spawn_entity`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=4)
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=13)
         if future.result() is not None:
             print('response: %r' % future.result())
         else:
@@ -708,6 +740,10 @@ class GazeboEnv(gym.Env):
             p23 = math.hypot(robot_pos_heading[1]-point_goal[1], robot_pos_heading[0]-point_goal[0])
             p12 = math.hypot(pos_robot[1]-robot_pos_heading[1], pos_robot[0]-robot_pos_heading[0])
             p13 = math.hypot(point_goal[1]-pos_robot[1], point_goal[0]-pos_robot[0])
+            if p12 == 0:
+                p12 += 0.0000001
+            if p13 == 0:
+                p13 += 0.0000001
             angle_robot_goal = np.rad2deg(math.acos((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13)))
             reward += ((60 - angle_robot_goal)/120.0)/2 +0.25 # between -0.25,0.5
             pos_rel = self.get_person_position_heading_relative_robot()[0]
