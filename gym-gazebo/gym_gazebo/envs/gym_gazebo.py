@@ -59,6 +59,8 @@ class Manager:
     def cleanup(self):
         self.node.destroy_client(self.client_delete )
         self.node.destroy_client(self.client_spawn)
+        self.node.destroy_client(self.client_pause)
+        self.node.destroy_client(self.client_unpause)
         self.node.destroy_node()
 
     def get_time_sec(self):
@@ -79,7 +81,7 @@ class Manager:
                 self.node.get_logger().info("Sending service request to `/client_pause`")
                 rclpy.spin_until_future_complete(self.node, future, timeout_sec=8)
                 if future is not None:
-                    print ("paused")
+                    self.node.get_logger().warn("paused")
                     return
                 else:
                     self.node.get_logger().error("not pause try again ")
@@ -104,7 +106,7 @@ class Manager:
                 self.node.get_logger().info("Sending service request to `/client_unpause`")
                 rclpy.spin_until_future_complete(self.node, future, timeout_sec=9)
                 if future is not None:
-                    print ("unpaused")
+                    self.node.get_logger().warn("unpaused")
                     return
                 else:
                     self.node.get_logger().error("not pause try again ")
@@ -128,15 +130,19 @@ class Manager:
         if future.result() is not None:
             print('response: %r' % future.result())
         else:
-            
-            self.node.get_logger().info("Sending second call service request to `/delete_entity`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=6)
-
-            if future.result() is not None:
-                print('second response: %r' % future.result())
-            else:    
-                raise RuntimeError(
+            raise RuntimeError(
                 'exception while calling service: %r' % future.exception())
+
+
+            # self.node.get_logger().info("Sending second call service request to `/delete_entity`")
+            # future = self.client_delete.call_async(request)
+            # rclpy.spin_until_future_complete(self.node, future, timeout_sec=6)
+
+            # if future.result() is not None:
+            #     print('second response: %r' % future.result())
+            # else:    
+            #     raise RuntimeError(
+            #     'exception while calling service: %r' % future.exception())
 
     def create_robot(self, name, name_space, translation, rotation):
         # self.remove_object(name)
@@ -259,12 +265,19 @@ class Robot():
         # self.model_states_sub.destroy()
         self.node.destroy_subscription(self.model_states_sub)
         self.node.destroy_subscription(self.laser_sub)
+        time.sleep(0.1)
         # self.node.destroy_node()
         # self.laser_sub.destroy()
         # self.model_states_sub.destroy()
-        self.manager.remove_object(self.name)
         self.spin_thread.join()
+        try:
+            self.manager.remove_object(self.name)
+        except RuntimeError as e:
+            self.node.get_logger().warn("runtime error restart later {} ".format(e))
+            self.node.destroy_node()
+            raise RuntimeError("destroy node problem ")
         self.node.destroy_node()
+        self.node.get_logger().warn("node destroy success")
 
     def states_cb(self, states_msg):
         model_idx = None
@@ -405,15 +418,15 @@ class Robot():
             self.stop_robot()
 
     def get_pos(self):
-        # counter_problem = 0
+        counter_problem = 0
         while self.pos[0] is None:
             if self.reset:
                 return (None, None)
             self.node.get_logger().warn("waiting for pos to be available")
             time.sleep(0.1)
-            # counter_problem += 1
-            # if counter_problem > 300:
-            #     raise Exception('Probable shared memory issue happend')
+            counter_problem += 1
+            if counter_problem > 300:
+                raise Exception('Probable shared memory issue happend')
 
         return self.pos[:2]
 
@@ -509,7 +522,7 @@ class GazeboEnv(gym.Env):
         self.min_distance = 1
         self.max_distance = 2.5
         self.number_of_steps = 0
-        self.max_numb_steps = 200
+        self.max_numb_steps = 2000
         self.reward_range = [0, 2]
         self.is_reseting = False
         
@@ -532,26 +545,35 @@ class GazeboEnv(gym.Env):
 
     def get_person_position_heading_relative_robot(self, get_history=False):
         got_position = False
-        while (not got_position):
-
-            try:
-                person_pos = self.person.get_pos()
-                robot_pos = self.robot.get_pos()
-                got_position = True
-            except Exception as e:
-                self.node.get_logger.error(" because of exception (in get_person_position heading rel..), {}".format(e))
-                time.sleep(3)
-
-        robot_pos = self.robot.get_pos()
         person_pos_history = self.person.pos_history.get_elemets()
         person_orientation_history = self.person.orientation_history.get_elemets()
 
-        while len(person_pos_history) != self.person.pos_history.window_size or len(person_orientation_history) != self.person.orientation_history.window_size:
-            self.node.get_logger().warn ("waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
-            robot_pos = self.robot.get_pos()
-            person_pos_history = self.person.pos_history.get_elemets()
-            person_orientation_history = self.person.orientation_history.get_elemets()
-            time.sleep(0.1)
+        while not got_position:
+            try:
+                person_pos_history = self.person.pos_history.get_elemets()
+                person_orientation_history = self.person.orientation_history.get_elemets()
+                person_pos = self.person.get_pos()
+                robot_pos = self.robot.get_pos()
+                person_pos_history = self.person.pos_history.get_elemets()
+                person_orientation_history = self.person.orientation_history.get_elemets()
+                if (len(person_pos_history) == self.person.pos_history.window_size and len(person_orientation_history) == self.person.orientation_history.window_size):
+                    got_position = True
+                else: 
+                    self.node.get_logger().warn ("waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
+            except Exception as e:
+                self.node.get_logger().error(" because of exception (in get_person_position heading rel..), {}".format(e))
+                self.reset_gazebo()
+                time.sleep(3)
+
+        # person_pos_history = self.person.pos_history.get_elemets()
+        # person_orientation_history = self.person.orientation_history.get_elemets()
+
+        # while len(person_pos_history) != self.person.pos_history.window_size or len(person_orientation_history) != self.person.orientation_history.window_size:
+        #     self.node.get_logger().warn ("waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
+        #     robot_pos = self.robot.get_pos()
+        #     person_pos_history = self.person.pos_history.get_elemets()
+        #     person_orientation_history = self.person.orientation_history.get_elemets()
+        #     time.sleep(0.1)
 
         person_pos_and_headings = [(person_pos_history[idx][:2] ,np.asarray((person_pos_history[idx][0] + math.cos(person_orientation_history[idx]), person_pos_history[idx][1] + math.sin(person_orientation_history[idx])))) for idx in range (len(person_pos_history)) ]
         angle_robot = math.pi / 2 - self.robot.orientation
@@ -623,10 +645,17 @@ class GazeboEnv(gym.Env):
 
     def get_laser_scan_all(self):
         images = self.robot.scan_image_history.get_elemets()
-        while len(images)!=self.robot.scan_image_history.window_size:
+        counter = 0
+        while len(images)!=self.robot.scan_image_history.window_size and counter<250:
             images = self.robot.scan_image_history.get_elemets()
-            self.node.get_logger().warn("wait for laser scan to get filled")
+            self.node.get_logger().warn("wait for laser scan to get filled sec: {}/25".format(counter/10))
             time.sleep(0.1)
+            counter +=1
+        if counter>=250:
+            raise RuntimeError(
+                'exception while calling service: %r' % future.exception())
+
+
         images = np.asarray(images)
 
         return (images.reshape((images.shape[1], images.shape[2], images.shape[0])))
@@ -734,7 +763,11 @@ class GazeboEnv(gym.Env):
         reward = 0
         if self.use_goal:
             point_goal = self.path[self.current_path_idx + 1]
-            pos_robot = self.robot.get_pos()
+            try:
+                pos_robot = self.robot.get_pos()
+            except Exception as e:
+                self.node.get_logger().error("get pos error in get_reward return 0")
+                return 0
             distance_goal = math.hypot(pos_robot[1] - point_goal[1], pos_robot[0] - point_goal[0])
             # reward = max (-distance_goal/3.0, -0.9) + 0.4 # between -0.5,0.4
             robot_pos_heading = np.asarray(
@@ -743,9 +776,9 @@ class GazeboEnv(gym.Env):
             p12 = math.hypot(pos_robot[1]-robot_pos_heading[1], pos_robot[0]-robot_pos_heading[0])
             p13 = math.hypot(point_goal[1]-pos_robot[1], point_goal[0]-pos_robot[0])
             if p12 == 0:
-                p12 += 0.0000001
+                p12 = 0.000001
             if p13 == 0:
-                p13 += 0.0000001
+                p13 = 0.000001
             angle_robot_goal = np.rad2deg(math.acos((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13)))
             reward += ((60 - angle_robot_goal)/120.0)/2 +0.25 # between -0.25,0.5
             pos_rel = self.get_person_position_heading_relative_robot()[0]

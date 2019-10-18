@@ -120,7 +120,7 @@ class A2CAgent:
                 observations[0][step] = next_obs[0].copy()
                 observations[1][step] = next_obs[1].copy()
                 actions[step], values[step] = self.model.action_value(next_obs[0][None, :], next_obs[1][None, :])
-                time.sleep(0.1)
+                # time.sleep(0.1)
                 if first:
                     print(self.model.summary()) # training loop: collect samples, send to optimizer, repeat updates times
                     first = False
