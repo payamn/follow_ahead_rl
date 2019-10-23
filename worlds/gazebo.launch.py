@@ -31,7 +31,7 @@ def generate_launch_description():
     # world = os.path.join(get_package_share_directory('turtlebot3_gazebo'), 'worlds', world_file_name)
     world = os.path.join("/home/payam/ros2_ws/src/follow_ahead_rl/worlds/", "empty.model")
     return LaunchDescription([
-        DeclareLaunchArgument('gui', default_value='true',
+        DeclareLaunchArgument('gui', default_value='false',
                               description='Set to "false" to run headless.'),
 
         DeclareLaunchArgument('server', default_value='true',

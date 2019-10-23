@@ -115,7 +115,7 @@ class Manager:
 
 
     def remove_object(self, name):
-        self.pause()
+        # self.pause()
         if not self.client_delete.service_is_ready():
             self.client_delete.wait_for_service(timeout_sec=8)
             self.node.get_logger().info("...connected!")
@@ -123,7 +123,7 @@ class Manager:
         request = DeleteEntity.Request()
         request.name = name
         future = self.client_delete.call_async(request)
-        self.unpause()
+        # self.unpause()
         with self.lock_spin:
             self.node.get_logger().info("Sending service request to `/delete_entity`")
             rclpy.spin_until_future_complete(self.node, future, timeout_sec=5)
@@ -256,13 +256,15 @@ class Robot():
 
     def spin(self):
         while not self.reset:
-            with self.manager.lock_spin:
+            if self.manager.lock_spin.acquire(timeout=1):
                 rclpy.spin_once(self.node)
+                self.manager.lock_spin.release()
             time.sleep(0.01)
 
     def remove(self):
         # self.laser_sub.destroy()
         # self.model_states_sub.destroy()
+        self.reset = True
         self.node.destroy_subscription(self.model_states_sub)
         self.node.destroy_subscription(self.laser_sub)
         time.sleep(0.1)
@@ -274,7 +276,10 @@ class Robot():
             self.manager.remove_object(self.name)
         except RuntimeError as e:
             self.node.get_logger().warn("runtime error restart later {} ".format(e))
-            self.node.destroy_node()
+            try:
+                self.node.destroy_node()
+            except Exception as e1:
+                print ("error during destroying the node we will raise exception for prev error {} current: ".format(e, e1))
             raise RuntimeError("destroy node problem ")
         self.node.destroy_node()
         self.node.get_logger().warn("node destroy success")
@@ -422,10 +427,10 @@ class Robot():
         while self.pos[0] is None:
             if self.reset:
                 return (None, None)
-            self.node.get_logger().warn("waiting for pos to be available")
+            self.node.get_logger().warn("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
             time.sleep(0.1)
             counter_problem += 1
-            if counter_problem > 300:
+            if counter_problem > 200:
                 raise Exception('Probable shared memory issue happend')
 
         return self.pos[:2]
@@ -549,6 +554,7 @@ class GazeboEnv(gym.Env):
         person_orientation_history = self.person.orientation_history.get_elemets()
 
         while not got_position:
+            need_reset = False
             try:
                 person_pos_history = self.person.pos_history.get_elemets()
                 person_orientation_history = self.person.orientation_history.get_elemets()
@@ -562,8 +568,19 @@ class GazeboEnv(gym.Env):
                     self.node.get_logger().warn ("waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
             except Exception as e:
                 self.node.get_logger().error(" because of exception (in get_person_position heading rel..), {}".format(e))
+                need_reset = True
+            if need_reset:
                 self.reset_gazebo()
-                time.sleep(3)
+                not_init = True
+                while not_init:
+                    try:
+                        self.init_simulator()
+                        not_init = False
+                    except RuntimeError as e:
+                        self.node.get_logger().error("error happend reseting: {}".format(e))
+                        self.reset_gazebo()
+
+
 
         # person_pos_history = self.person.pos_history.get_elemets()
         # person_orientation_history = self.person.orientation_history.get_elemets()
@@ -653,7 +670,7 @@ class GazeboEnv(gym.Env):
             counter +=1
         if counter>=250:
             raise RuntimeError(
-                'exception while calling service: %r' % future.exception())
+                'exception while calling get_laser_scan:')
 
 
         images = np.asarray(images)
@@ -692,12 +709,22 @@ class GazeboEnv(gym.Env):
         cv.waitKey(1)
 
     def get_observation(self):
+        got_laser = False
+        while not got_laser:
+            try:
+                laser_all = self.get_laser_scan_all()
+                got_laser = True
+            except Exception as e:
+                self.node.get_logger().error("laser_error reseting")
+                self.reset(reset_gazebo = True)
+            
         poses, headings = self.get_person_position_heading_relative_robot(get_history=True)
         # self.visualize_observation(poses, headings, self.get_laser_scan())
         orientation_position = np.append(poses, headings)
         velocities = np.asarray([self.person.get_velocity(), self.robot.get_velocity()])
+        
+        return laser_all, np.append(orientation_position, velocities)
 
-        return self.get_laser_scan_all(), np.append(orientation_position, velocities)
 
     def reset_gazebo(self, no_manager=False):
         subprocess.call('pkill -9 gzclient', shell=True)
@@ -738,7 +765,7 @@ class GazeboEnv(gym.Env):
             print('max number of steps episode over')
         reward = min(max(reward, -1), 1)
         self.node.get_logger().info("reward: {} ".format(reward))
-        reward += 1
+        #reward += 1
         return ob, reward, episode_over, {}
 
     def is_collided(self):
@@ -779,7 +806,7 @@ class GazeboEnv(gym.Env):
                 p12 = 0.000001
             if p13 == 0:
                 p13 = 0.000001
-            angle_robot_goal = np.rad2deg(math.acos((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13)))
+            angle_robot_goal = np.rad2deg(math.acos(max(min((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13), 1), -1)))
             reward += ((60 - angle_robot_goal)/120.0)/2 +0.25 # between -0.25,0.5
             pos_rel = self.get_person_position_heading_relative_robot()[0]
             distance = math.hypot(pos_rel[0], pos_rel[1])
@@ -809,7 +836,7 @@ class GazeboEnv(gym.Env):
             # ToDO check for obstacle
         return reward
 
-    def reset(self):
+    def reset(self, reset_gazebo=False):
         self.is_reseting = True
         self.robot.reset = True
         self.person.reset = True
@@ -820,22 +847,22 @@ class GazeboEnv(gym.Env):
                 # self.manager.pause()
                 self.robot.remove()
                 self.person.remove()
-                # self.manager.unpause()
+                self.node.get_logger().info("robot and person removed ")
+                if reset_gazebo:
+                    self.reset_gazebo()    # self.manager.unpause()
             except RuntimeError as r:
                 self.reset_gazebo()
                 # self.manager.unpause()
             not_init = True
-            while not_init:
-                try:
-                    self.init_simulator()
-                    not_init = False
-                except RuntimeError as e:
-                    self.node.get_logger().error("error happend reseting: {}".format(e))
-                    self.reset_gazebo()
-
-        """ Repeats NO-OP action until a new episode begins. """
-
-        return self.get_observation()
+            try:
+                self.init_simulator()
+                not_init = False
+            except RuntimeError as e:
+                self.node.get_logger().error("error happend reseting: {}".format(e))
+        if not_init:
+            return (self.reset())
+        else:
+            return self.get_observation()
 
     def render(self, mode='human', close=False):
         """ Viewer only supports human mode currently. """
