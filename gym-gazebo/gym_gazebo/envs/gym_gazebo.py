@@ -20,6 +20,7 @@ from ament_index_python.packages import get_package_share_directory
 
 from gazebo_msgs.srv import SpawnEntity
 from gazebo_msgs.srv import DeleteEntity
+from gazebo_msgs.srv import SetEntityState
 from std_srvs.srv import Empty
 
 from gazebo_msgs.msg import ModelStates
@@ -53,6 +54,7 @@ class Manager:
         self.node.get_logger().info(
             'Creating Service client_spawn to connect to `/spawn_entity`')
         self.client_spawn = self.node.create_client(SpawnEntity, "/spawn_entity")
+        self.set_entity_state = self.node.create_client(SetEntityState, "/set_entity_state")
         self.client_pause = self.node.create_client(Empty, "/pause_physics")
         self.client_unpause = self.node.create_client(Empty, "/unpause_physics")
 
@@ -87,9 +89,6 @@ class Manager:
                     self.node.get_logger().error("not pause try again ")
         raise RuntimeError(
                 'exception while calling service: %r' % future.exception())
-
-
-
 
     def unpause(self):
         self.node.get_logger().info("Connecting to `/client_unpause` service...")
@@ -133,16 +132,38 @@ class Manager:
             raise RuntimeError(
                 'exception while calling service: %r' % future.exception())
 
+    def move_robot(self, name, name_space, translation, rotation):
+        # self.remove_object(name)
+        self.node.get_logger().info("Connecting to `/set_entity_state` service...")
+        if not self.set_entity_state.service_is_ready():
+            self.set_entity_state.wait_for_service(timeout_sec=8)
+            self.node.get_logger().info("set entity state connected!")
 
-            # self.node.get_logger().info("Sending second call service request to `/delete_entity`")
-            # future = self.client_delete.call_async(request)
-            # rclpy.spin_until_future_complete(self.node, future, timeout_sec=6)
+        quaternion_rotation = euler2quat(0, rotation, 0)
 
-            # if future.result() is not None:
-            #     print('second response: %r' % future.result())
-            # else:    
-            #     raise RuntimeError(
-            #     'exception while calling service: %r' % future.exception())
+        # Set data for request
+        request = SetEntityState.Request()
+        request.state.name = name
+        # Set position
+        request.state.pose.position.x = float(translation[0])
+        request.state.pose.position.y = float(translation[1])
+        request.state.pose.position.z = 0.009
+        # Set orientation
+        request.state.pose.orientation.x = quaternion_rotation[3]
+        request.state.pose.orientation.y = quaternion_rotation[1]
+        request.state.pose.orientation.z = quaternion_rotation[2]
+        request.state.pose.orientation.w = quaternion_rotation[0]
+
+        future = self.set_entity_state.call_async(request)
+        self.node.get_logger().info("before lock `/set_entity_state`")
+        with self.lock_spin:
+            self.node.get_logger().info("Sending service request to `/set_entity_state`")
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=13)
+        if future.result() is not None:
+            print('response: %r' % future.result())
+        else:
+            raise RuntimeError(
+                'exception while calling set_entity state: %r' % future.exception())
 
     def create_robot(self, name, name_space, translation, rotation):
         # self.remove_object(name)
@@ -215,12 +236,14 @@ class History():
 
 class Robot():
     def __init__(self, name, init_pos, angle, manager, node, max_angular_speed=1, max_linear_speed=1):
-        manager.create_robot(name, name, init_pos, angle)
+        # manager.create_robot(name, name, init_pos, angle)
+        manager.move_robot(name, name, init_pos, angle)
         #time.sleep(5)
         self.name = name
         self.manager = manager
         self.init_node = False
         self.node = rclpy.create_node(name)
+        self.alive = True
         # self.node = node
         self.init_node = True
         self.deleted = False
@@ -252,10 +275,27 @@ class Robot():
 
         self.spin_thread = threading.Thread(target=self.spin, args=())
         self.spin_thread.start()
+        
 
+    def update(self, pos, angle):
+        self.manager.move_robot(self.name, self.name, pos, angle)
+        self.alive = True
+        self.pos_history = History(5, 1, self.manager)
+        self.pos = (None, None)
+        self.angular_pid = PID(1, 0, 0.03, setpoint=0)
+        self.linear_pid = PID(1, 0, 0.05, setpoint=0)
+        self.orientation = angle
+        self.orientation_history = History(5, 1, self.manager)
+        self.scan_image = None
+        self.scan_image_history = History(5, 1, self.manager)
+        self.is_collided = False
+        self.is_pause = False
+        self.reset = False
+        self.velocity_history = np.zeros((self.velocity_window))
+        self.last_velocity_idx = 0
 
     def spin(self):
-        while not self.reset:
+        while self.alive:
             if self.manager.lock_spin.acquire(timeout=1):
                 rclpy.spin_once(self.node)
                 self.manager.lock_spin.release()
@@ -265,39 +305,40 @@ class Robot():
         # self.laser_sub.destroy()
         # self.model_states_sub.destroy()
         self.reset = True
-        self.node.destroy_subscription(self.model_states_sub)
-        self.node.destroy_subscription(self.laser_sub)
-        time.sleep(0.1)
+        # self.node.destroy_subscription(self.model_states_sub)
+        # self.node.destroy_subscription(self.laser_sub)
+        # time.sleep(0.1)
         # self.node.destroy_node()
         # self.laser_sub.destroy()
         # self.model_states_sub.destroy()
-        self.spin_thread.join()
-        try:
-            self.manager.remove_object(self.name)
-        except RuntimeError as e:
-            self.node.get_logger().warn("runtime error restart later {} ".format(e))
-            try:
-                self.node.destroy_node()
-            except Exception as e1:
-                print ("error during destroying the node we will raise exception for prev error {} current: ".format(e, e1))
-            raise RuntimeError("destroy node problem ")
-        self.node.destroy_node()
-        self.node.get_logger().warn("node destroy success")
+        # self.spin_thread.join()
+        # try:
+        #     self.manager.remove_object(self.name)
+        # except RuntimeError as e:
+        #     self.node.get_logger().warn("runtime error restart later {} ".format(e))
+        #     try:
+        #         self.node.destroy_node()
+        #     except Exception as e1:
+        #         print("error during destroying the node we will raise exception for prev error {} current: ".format(e, e1))
+        #     raise RuntimeError("destroy node problem ")
+        # self.node.destroy_node()
+        # self.node.get_logger().warn("node destroy success")
 
     def states_cb(self, states_msg):
         model_idx = None
         prev_pos = self.pos
-        for i in range (len(states_msg.name)):
+        for i in range(len(states_msg.name)):
             if states_msg.name[i] == self.name:
                 # self.node.get_logger().warn("statecb")
                 model_idx = i
                 break
         if model_idx is None:
-            print ("cannot find {}".format(self.name))
+            print("cannot find {}".format(self.name))
             return
         pos = states_msg.pose[model_idx]
-        self.pos = (pos.position.x, pos.position.y, pos.position.z)
+        self.pos = (pos.position.x, pos.position.y, self.manager.get_time_sec())
         euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
+
         self.orientation = euler[0]
         self.orientation_history.add_element(self.orientation)
         
@@ -310,7 +351,6 @@ class Robot():
 
     def laser_cb(self, laser_msg):
 
-        # print("laser cb")
         if self.reset:
             return
         angle_increments = np.arange(float(laser_msg.angle_min) - float(laser_msg.angle_min) , float(laser_msg.angle_max) - 0.001 - float(laser_msg.angle_min), float(laser_msg.angle_increment))
@@ -356,27 +396,6 @@ class Robot():
         cmd_vel.linear.x = linear_vel
         cmd_vel.angular.z = angular_vel
         self.cmd_vel_pub.publish(cmd_vel)
-    #     angular_vel = 0
-    #     linear_vel = 0
-    #     if action == 0:
-    #         pass # stop robot
-    #     elif action == 1:
-    #         linear_vel = self.linear_max
-    #     elif action == 2:
-    #         linear_vel = -self.linear_max
-    #     elif action == 3:
-    #         angular_vel = self.angular_max
-    #     elif action == 4:
-    #         angular_vel = -self.angular_max
-    #     elif action == 5:
-    #         linear_vel = self.linear_max/3.0
-    #         angular_vel = -2*self.angular_max/3.0
-    #     elif action == 6:
-    #         linear_vel = self.linear_max/3.0
-    #         angular_vel = 2*self.angular_max/3.0
-    #     elif action == 7:
-    #         speed_left = self.max_speed/2
-    #         speed_right = self.max_speed/2
 
     def stop_robot(self):
         self.cmd_vel_pub.publish(Twist())
@@ -456,10 +475,7 @@ class Robot():
             self.velocity_history[self.last_velocity_idx] = math.hypot(self.pos[1]-prev_pos[1], self.pos[0]-prev_pos[0]) / (self.pos[2]-prev_pos[2])
             self.last_velocity_idx = (self.last_velocity_idx + 1) % self.velocity_window
 
-#robot = Robot("r1", (10,0,0.08), -140*math.pi/180.0, manager, max_speed=6.3)
-##robot.take_action(86)
-#person_thread = threading.Thread(target=robot.go_to_pos, args=((+5,-15), True,))
-#person_thread.start()
+
 class GazeboEnv(gym.Env):
 
     def __init__(self):
@@ -477,10 +493,11 @@ class GazeboEnv(gym.Env):
                 self.path = pickle.load(f)
         except Exception as e:
             print(e)
+
         self.is_reseting = True
         self.lock = _thread.allocate_lock()
         self.robot_mode = 0
-
+        self.create_robots()
         with self.lock:
             self.init_simulator()
 
@@ -494,8 +511,27 @@ class GazeboEnv(gym.Env):
             rclpy.spin_once(self.node)
             time.sleep(0.01)
 
-    def init_simulator(self):
+    def create_robots(self):
+        idx_start = random.randint(0, len(self.path) - 20)
+        self.current_path_idx = idx_start
 
+        init_pos_person = self.path[idx_start]
+        angle_person = self.calculate_angle_using_path(idx_start)
+        idx_robot = idx_start + 1
+        while (math.hypot(self.path[idx_robot][1] - self.path[idx_start][1],
+                          self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
+            idx_robot += 1
+        angle_robot = self.calculate_angle_using_path(idx_robot)
+        # manager.create_robot(name, name, init_pos, angle)
+        self.manager.create_robot('my_robot', 'my_robot', self.path[idx_robot], angle_robot)
+        self.manager.create_robot('person', 'person', self.path[idx_start], angle_person)
+        self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, manager=self.manager, node=self.node, max_angular_speed=1.6, max_linear_speed=1.6)
+        self.person = Robot('person', init_pos=self.path[idx_start],  angle=angle_person, manager=self.manager, node=self.node,  max_angular_speed=1.4, max_linear_speed=.9)
+        
+    def init_simulator(self):
+        
+        self.node.get_logger().info("init simulation called")
+        self.is_reseting = False
         self.is_pause = True
         idx_start = random.randint(0, len(self.path)-20)
         self.current_path_idx = idx_start
@@ -507,10 +543,16 @@ class GazeboEnv(gym.Env):
             idx_robot += 1
         angle_robot = self.calculate_angle_using_path(idx_robot)
         # self.manager.pause()
-        self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, manager=self.manager, node=self.node, max_angular_speed=1.6, max_linear_speed=1.6)
-        self.person = Robot('person', init_pos=self.path[idx_start],  angle=angle_person, manager=self.manager, node=self.node,  max_angular_speed=1.4, max_linear_speed=.9)
+        # self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, manager=self.manager, node=self.node, max_angular_speed=1.6, max_linear_speed=1.6)
+        # self.person = Robot('person', init_pos=self.path[idx_start],  angle=angle_person, manager=self.manager, node=self.node,  max_angular_speed=1.4, max_linear_speed=.9)
+        self.robot.update(self.path[idx_robot],  angle_robot)
+        self.person.update(self.path[idx_start],  angle_person)
         # self.manager.unpause()
-        self.position_thread = _thread.start_new_thread(self.path_follower, (self.person, idx_start, self.robot,))
+        self.position_thread = threading.Thread(target=self.path_follower, args=(self.person, idx_start, self.robot,))
+        self.position_thread.daemon = True
+
+        self.node.get_logger().info("starting position thread")
+        self.position_thread.start()
         # while True:
         #     print(self.get_angle_person_robot())
         #     time.sleep(0.5)
@@ -529,11 +571,12 @@ class GazeboEnv(gym.Env):
         self.number_of_steps = 0
         self.max_numb_steps = 2000
         self.reward_range = [0, 2]
-        self.is_reseting = False
+        self.robot.reset = False
+        self.person.reset = False
         
         # TODO: comment this after start agent
         # self.resume_simulator()
-
+        self.node.get_logger().info("init simulation finished")
 
     def pause(self):
         self.is_pause = True
@@ -620,9 +663,15 @@ class GazeboEnv(gym.Env):
         1: robot will try to go to a point after person
     """
     def path_follower(self, person, idx_start, robot):
-        while self.is_reseting:
-            time.sleep(0.1)
+
+        while self.is_pause:
+            if self.is_reseting:
+                self.node.get_logger().info( "path follower return as reseting ")
+                return 
+            time.sleep(0.01) 
             self.node.get_logger().info( "path follower waiting for reset to be false")
+
+        self.node.get_logger().info( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
         with self.lock:
             self.node.get_logger().info("path follower got the lock")
             for idx in range (idx_start, len(self.path)-3):
@@ -727,6 +776,8 @@ class GazeboEnv(gym.Env):
 
 
     def reset_gazebo(self, no_manager=False):
+        
+        self.node.get_logger().error( "reset gazebo")
         subprocess.call('pkill -9 gzclient', shell=True)
         subprocess.call('tmux kill-session -t gazebo', shell=True)
         subprocess.Popen(['tmux', 'new-session', '-d', '-s', 'gazebo'])
@@ -837,24 +888,34 @@ class GazeboEnv(gym.Env):
         return reward
 
     def reset(self, reset_gazebo=False):
+        self.is_pause = True
         self.is_reseting = True
         self.robot.reset = True
         self.person.reset = True
-        self.node.get_logger().info("trying to get the lock")
+        self.node.get_logger().info("trying to get the lock for reset")
+        if reset_gazebo:
+            self.reset_gazebo()
         with self.lock:
+
             self.node.get_logger().info("got the lock")
-            try:
-                # self.manager.pause()
-                self.robot.remove()
-                self.person.remove()
-                self.node.get_logger().info("robot and person removed ")
-                if reset_gazebo:
-                    self.reset_gazebo()    # self.manager.unpause()
-            except RuntimeError as r:
-                self.reset_gazebo()
-                # self.manager.unpause()
+            # self.node.get_logger().info("got the lock")
+            # try:
+            #     # self.manager.pause()
+            #     self.robot.remove()
+            #     self.person.remove()
+            #     self.node.get_logger().info("robot and person removed ")
+            #     if reset_gazebo:
+            #         self.reset_gazebo()    # self.manager.unpause()
+            # except RuntimeError as r:
+            #     self.reset_gazebo()
+            #     # self.manager.unpause()
             not_init = True
             try:
+                if self.position_thread.isAlive():
+
+                    self.node.get_logger().info("wait for position thread to join")
+                    self.position_thread.join()
+                    self.node.get_logger().info("position thread joined")
                 self.init_simulator()
                 not_init = False
             except RuntimeError as e:
