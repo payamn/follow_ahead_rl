@@ -47,11 +47,11 @@ class Manager:
         self.sdf_file_path = os.path.join("/home/payam/ros2_ws/src/follow_ahead_rl/worlds/", "turtlebot3_burger", "model.sdf")
         self.node = rclpy.create_node("manager")
         self.time = self.node.get_clock()
-        self.node.get_logger().info(
+        self.node.get_logger().debug(
             'Creating Service client_delete to connect to `/delete_entity`')
         self.client_delete = self.node.create_client(DeleteEntity, "/delete_entity")
 
-        self.node.get_logger().info(
+        self.node.get_logger().debug(
             'Creating Service client_spawn to connect to `/spawn_entity`')
         self.client_spawn = self.node.create_client(SpawnEntity, "/spawn_entity")
         self.set_entity_state = self.node.create_client(SetEntityState, "/set_entity_state")
@@ -69,10 +69,10 @@ class Manager:
         return self.time.now().nanoseconds/1000000000.0
 
     def pause(self):
-        self.node.get_logger().info("Connecting to `/client_pause` service...")
+        self.node.get_logger().debug("Connecting to `/client_pause` service...")
         if not self.client_pause.service_is_ready():
             self.client_pause.wait_for_service(timeout_sec=8)
-            self.node.get_logger().info("...connected!")
+            self.node.get_logger().debug("...connected!")
 
         request = Empty.Request()
         future = self.client_pause.call_async(request)
@@ -80,7 +80,7 @@ class Manager:
         while num_try<2:
             with self.lock_spin:
                 num_try += 1
-                self.node.get_logger().info("Sending service request to `/client_pause`")
+                self.node.get_logger().debug("Sending service request to `/client_pause`")
                 rclpy.spin_until_future_complete(self.node, future, timeout_sec=8)
                 if future is not None:
                     self.node.get_logger().warn("paused")
@@ -91,10 +91,10 @@ class Manager:
                 'exception while calling service: %r' % future.exception())
 
     def unpause(self):
-        self.node.get_logger().info("Connecting to `/client_unpause` service...")
+        self.node.get_logger().debug("Connecting to `/client_unpause` service...")
         if not self.client_unpause.service_is_ready():
             self.client_unpause.wait_for_service(timeout_sec=8)
-            self.node.get_logger().info("...connected!")
+            self.node.get_logger().debug("...connected!")
 
         request = Empty.Request()
         future =  self.client_unpause.call_async(request)
@@ -102,7 +102,7 @@ class Manager:
         while num_try<2:
             num_try+=1
             with self.lock_spin:
-                self.node.get_logger().info("Sending service request to `/client_unpause`")
+                self.node.get_logger().debug("Sending service request to `/client_unpause`")
                 rclpy.spin_until_future_complete(self.node, future, timeout_sec=9)
                 if future is not None:
                     self.node.get_logger().warn("unpaused")
@@ -117,27 +117,25 @@ class Manager:
         # self.pause()
         if not self.client_delete.service_is_ready():
             self.client_delete.wait_for_service(timeout_sec=8)
-            self.node.get_logger().info("...connected!")
+            self.node.get_logger().debug("...connected!")
         # Set data for request
         request = DeleteEntity.Request()
         request.name = name
         future = self.client_delete.call_async(request)
         # self.unpause()
         with self.lock_spin:
-            self.node.get_logger().info("Sending service request to `/delete_entity`")
+            self.node.get_logger().debug("Sending service request to `/delete_entity`")
             rclpy.spin_until_future_complete(self.node, future, timeout_sec=5)
-        if future.result() is not None:
-            print('response: %r' % future.result())
-        else:
+        if future.result() is None:
             raise RuntimeError(
                 'exception while calling service: %r' % future.exception())
 
     def move_robot(self, name, name_space, translation, rotation):
         # self.remove_object(name)
-        self.node.get_logger().info("Connecting to `/set_entity_state` service...")
+        # self.node.get_logger().info("Connecting to `/set_entity_state` service...")
         if not self.set_entity_state.service_is_ready():
             self.set_entity_state.wait_for_service(timeout_sec=8)
-            self.node.get_logger().info("set entity state connected!")
+            self.node.get_logger().debug("set entity state connected!")
 
         quaternion_rotation = euler2quat(0, rotation, 0)
 
@@ -155,22 +153,20 @@ class Manager:
         request.state.pose.orientation.w = quaternion_rotation[0]
 
         future = self.set_entity_state.call_async(request)
-        self.node.get_logger().info("before lock `/set_entity_state`")
+        # self.node.get_logger().info("before lock `/set_entity_state`")
         with self.lock_spin:
-            self.node.get_logger().info("Sending service request to `/set_entity_state`")
+            # self.node.get_logger().info("Sending service request to `/set_entity_state`")
             rclpy.spin_until_future_complete(self.node, future, timeout_sec=13)
-        if future.result() is not None:
-            print('response: %r' % future.result())
-        else:
+        if future.result() is None:
             raise RuntimeError(
                 'exception while calling set_entity state: %r' % future.exception())
 
     def create_robot(self, name, name_space, translation, rotation):
         # self.remove_object(name)
-        self.node.get_logger().info("Connecting to `/spawn_entity` service...")
+        # self.node.get_logger().info("Connecting to `/spawn_entity` service...")
         if not self.client_spawn.service_is_ready():
             self.client_spawn.wait_for_service(timeout_sec=8)
-            self.node.get_logger().info("...connected!")
+            self.node.get_logger().debug("...connected!")
 
         # Set data for request
         request = SpawnEntity.Request()
@@ -190,12 +186,10 @@ class Manager:
 
         future = self.client_spawn.call_async(request)
         with self.lock_spin:
-            self.node.get_logger().info("Sending service request to `/spawn_entity`")
+            # self.node.get_logger().info("Sending service request to `/spawn_entity`")
             rclpy.spin_until_future_complete(self.node, future, timeout_sec=13)
-        if future.result() is not None:
-            print('response: %r' % future.result())
-        else:
-            raise RuntimeError(
+        if future.result() is None:
+           raise RuntimeError(
                 'exception while calling service: %r' % future.exception())
 
     def reset(self):
@@ -260,7 +254,7 @@ class Robot():
         self.cmd_vel_pub = self.node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
         self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, qos_profile=qosProfileSensors)
         self.model_states_sub = self.node.create_subscription(ModelStates, '/model_states', self.states_cb, qos_profile=qosProfileSensors)
-        self.angular_pid = PID(1, 0, 0.03, setpoint=0)
+        self.angular_pid = PID(0.1, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1, 0, 0.05, setpoint=0)
         self.orientation = angle
         self.orientation_history = History(5, 1, manager)
@@ -282,7 +276,7 @@ class Robot():
         self.alive = True
         self.pos_history = History(5, 1, self.manager)
         self.pos = (None, None)
-        self.angular_pid = PID(1, 0, 0.03, setpoint=0)
+        self.angular_pid = PID(0.1, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1, 0, 0.05, setpoint=0)
         self.orientation = angle
         self.orientation_history = History(5, 1, self.manager)
@@ -364,7 +358,7 @@ class Robot():
         min_ranges = float("inf")  if len(ranges)==0  else np.min(ranges)
         if min_ranges < self.collision_distance:
             self.is_collided = True
-            self.node.get_logger().info("robot collided:")
+            self.node.get_logger().debug("robot collided:")
         x = np.floor((self.width_laser_image/2.0 - (self.width_laser_image / 2 / self.max_laser_range) * np.multiply(np.cos(angle_increments), ranges))).astype(np.int)
         y = np.floor((self.height_laser_image-1 - (self.height_laser_image / self.max_laser_range) * np.multiply(np.sin(angle_increments), ranges))).astype(np.int)
         if len(x) > 0 and (np.max(x) >= self.width_laser_image or np.max(y) >= self.height_laser_image):
@@ -389,9 +383,11 @@ class Robot():
     def take_action(self, action):
         if self.is_pause:
             return
-        linear_vel = (action%10 - 4) * self.max_linear_vel / 5.0
-        angular_vel = (action//10 - 3) * self.max_angular_vel / 3.0 
-        print ("take action linear {} angular {}".format(linear_vel, angular_vel))
+        # linear_vel = (action%10 - 4) * self.max_linear_vel / 5.0
+        # angular_vel = (action//10 - 3) * self.max_angular_vel / 3.0
+        linear_vel = action[0]*self.max_linear_vel
+        angular_vel = action[1]*self.max_angular_vel
+        # print ("take action linear {} angular {}".format(linear_vel, angular_vel))
         cmd_vel = Twist()
         cmd_vel.linear.x = linear_vel
         cmd_vel.angular.z = angular_vel
@@ -428,7 +424,9 @@ class Robot():
             # angular_vel = min(max(self.angular_pid(math.atan2(math.sin(angle-self.orientation), math.cos(angle-self.orientation)))*200, -self.max_speed/3),self.max_speed)
             angular_vel = -min(max(self.angular_pid(diff_angle)*3, -self.max_angular_vel),self.max_angular_vel)
             linear_vel = min(max(self.linear_pid(-distance), -self.max_linear_vel), self.max_linear_vel)
-            if abs(angular_vel) > self.max_angular_vel/2 and linear_vel > self.max_linear_vel/2:
+            if abs(diff_angle) > math.pi /2:
+                linear_vel = linear_vel /20.0
+            elif abs(angular_vel) > self.max_angular_vel/2 and linear_vel > self.max_linear_vel/2:
                 linear_vel = linear_vel/4
             if self.reset:
                 return
@@ -436,7 +434,7 @@ class Robot():
             cmd_vel.linear.x = float(linear_vel)
             cmd_vel.angular.z = float(angular_vel)
             self.cmd_vel_pub.publish(cmd_vel) 
-            time.sleep(0.1)
+            time.sleep(0.005)
 
         if stop_after_getting:
             self.stop_robot()
@@ -446,8 +444,9 @@ class Robot():
         while self.pos[0] is None:
             if self.reset:
                 return (None, None)
-            self.node.get_logger().warn("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
-            time.sleep(0.1)
+            if counter_problem > 20:
+                self.node.get_logger().warn("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
+            time.sleep(0.01)
             counter_problem += 1
             if counter_problem > 200:
                 raise Exception('Probable shared memory issue happend')
@@ -530,7 +529,7 @@ class GazeboEnv(gym.Env):
         
     def init_simulator(self):
         
-        self.node.get_logger().info("init simulation called")
+        self.node.get_logger().debug("init simulation called")
         self.is_reseting = False
         self.is_pause = True
         idx_start = random.randint(0, len(self.path)-20)
@@ -551,21 +550,22 @@ class GazeboEnv(gym.Env):
         self.position_thread = threading.Thread(target=self.path_follower, args=(self.person, idx_start, self.robot,))
         self.position_thread.daemon = True
 
-        self.node.get_logger().info("starting position thread")
+        self.node.get_logger().debug("starting position thread")
         self.position_thread.start()
         # while True:
         #     print(self.get_angle_person_robot())
         #     time.sleep(0.5)
 
-        self.observation_space = gym.spaces.Tuple(
-                (
-                    gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
-                    gym.spaces.Box(low=0, high=1, shape=(17,))
-                )
-            )
+        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(17,))
+            # gym.spaces.Tuple(
+            #     (
+            #         gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
+            #         gym.spaces.Box(low=0, high=1, shape=(17,))
+            #     )
+            # )
         # Action space omits the Tackle/Catch actions, which are useful
         # on defense
-        self.action_space = gym.spaces.Discrete(69)
+        self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
         self.min_distance = 1
         self.max_distance = 2.5
         self.number_of_steps = 0
@@ -576,7 +576,7 @@ class GazeboEnv(gym.Env):
         
         # TODO: comment this after start agent
         # self.resume_simulator()
-        self.node.get_logger().info("init simulation finished")
+        self.node.get_logger().debug("init simulation finished")
 
     def pause(self):
         self.is_pause = True
@@ -664,24 +664,28 @@ class GazeboEnv(gym.Env):
     """
     def path_follower(self, person, idx_start, robot):
 
+        counter = 0
         while self.is_pause:
             if self.is_reseting:
-                self.node.get_logger().info( "path follower return as reseting ")
+                self.node.get_logger().debug( "path follower return as reseting ")
                 return 
-            time.sleep(0.01) 
-            self.node.get_logger().info( "path follower waiting for reset to be false")
-
-        self.node.get_logger().info( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
-        with self.lock:
-            self.node.get_logger().info("path follower got the lock")
+            time.sleep(0.01)
+            if counter > 10000:
+                self.node.get_logger().info( "path follower waiting for pause to be false")
+                counter = 0
+            counter += 1
+        self.node.get_logger().debug( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
+        if self.lock.acquire(timeout=10):
+            self.node.get_logger().debug("path follower got the lock")
             for idx in range (idx_start, len(self.path)-3):
                 point = self.path[idx]
                 self.current_path_idx = idx
                 counter_pause = 0
                 while self.is_pause:
                     counter_pause+=1
-                    self.node.get_logger().info("pause in path follower")
+                    self.node.get_logger().debug("pause in path follower")
                     if self.is_reseting or counter_pause > 200:
+                        self.lock.release()
                         return
                     time.sleep(0.1)
                 try:
@@ -699,11 +703,14 @@ class GazeboEnv(gym.Env):
                 except Exception as e:
                     self.node.get_logger().warn("path follower {}, {}".format(self.is_reseting, e))
                     break
-                self.node.get_logger().info("got to point: {} out of {}".format(idx - idx_start, len(self.path) - idx_start ))
+                self.node.get_logger().debug("got to point: {} out of {}".format(idx - idx_start, len(self.path) - idx_start ))
                 if self.is_reseting:
                     person.stop_robot()
                     break
-        self.node.get_logger().info("path follower release the lock")
+            self.lock.release()
+            self.node.get_logger().debug("path follower release the lock")
+        else:
+            self.node.get_logger().error("problem in getting the log in path follower")
         # robot.stop_robot()
 
     def get_laser_scan(self):
@@ -714,9 +721,10 @@ class GazeboEnv(gym.Env):
         counter = 0
         while len(images)!=self.robot.scan_image_history.window_size and counter<250:
             images = self.robot.scan_image_history.get_elemets()
-            self.node.get_logger().warn("wait for laser scan to get filled sec: {}/25".format(counter/10))
-            time.sleep(0.1)
+            time.sleep(0.005)
             counter +=1
+            if counter > 10:
+                self.node.get_logger().warn("wait for laser scan to get filled sec: {}/25".format(counter / 10))
         if counter>=250:
             raise RuntimeError(
                 'exception while calling get_laser_scan:')
@@ -772,7 +780,7 @@ class GazeboEnv(gym.Env):
         orientation_position = np.append(poses, headings)
         velocities = np.asarray([self.person.get_velocity(), self.robot.get_velocity()])
         
-        return laser_all, np.append(orientation_position, velocities)
+        return np.append(orientation_position, velocities)
 
 
     def reset_gazebo(self, no_manager=False):
@@ -799,6 +807,7 @@ class GazeboEnv(gym.Env):
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
+        time.sleep(0.02)
         reward = self.get_reward()
         ob = self.get_observation()
         episode_over = False
@@ -815,7 +824,8 @@ class GazeboEnv(gym.Env):
             episode_over = True
             print('max number of steps episode over')
         reward = min(max(reward, -1), 1)
-        self.node.get_logger().info("reward: {} ".format(reward))
+        self.node.get_logger().debug("reward: {} ".format(reward))
+        print (action, reward)
         #reward += 1
         return ob, reward, episode_over, {}
 
@@ -892,12 +902,12 @@ class GazeboEnv(gym.Env):
         self.is_reseting = True
         self.robot.reset = True
         self.person.reset = True
-        self.node.get_logger().info("trying to get the lock for reset")
+        self.node.get_logger().debug("trying to get the lock for reset")
         if reset_gazebo:
             self.reset_gazebo()
         with self.lock:
 
-            self.node.get_logger().info("got the lock")
+            self.node.get_logger().debug("got the lock")
             # self.node.get_logger().info("got the lock")
             # try:
             #     # self.manager.pause()
@@ -913,9 +923,9 @@ class GazeboEnv(gym.Env):
             try:
                 if self.position_thread.isAlive():
 
-                    self.node.get_logger().info("wait for position thread to join")
+                    self.node.get_logger().debug("wait for position thread to join")
                     self.position_thread.join()
-                    self.node.get_logger().info("position thread joined")
+                    self.node.get_logger().debug("position thread joined")
                 self.init_simulator()
                 not_init = False
             except RuntimeError as e:

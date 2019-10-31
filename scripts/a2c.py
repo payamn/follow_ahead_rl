@@ -1,3 +1,4 @@
+import wandb
 import time
 import gym
 import os
@@ -133,6 +134,7 @@ class A2CAgent:
                     next_obs = env.reset()
                     print("reset done")
                     env.resume_simulator()
+                    wandb.log({"reward":ep_rews[-2]})
                     logging.info("Episode: %03d, Reward: %03d " % (len(ep_rews) - 1, ep_rews[-2]))
                     print("Episode: %d, Reward: %f" % (len(ep_rews) - 1, ep_rews[-2]))
                 # print (step, actions[step])
@@ -197,6 +199,8 @@ class A2CAgent:
 
 
 if __name__ == '__main__':
+
+    wandb.init(project="followahead_rl")
     parser = argparse.ArgumentParser(description='input weight file of the network')
     parser.add_argument('--weight', default="weights/bestloses", type=str, help='weight file')
     gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -234,4 +238,4 @@ if __name__ == '__main__':
     plt.plot(np.arange(0, len(rewards_history), 25), rewards_history[::25])
     plt.xlabel('Episode')
     plt.ylabel('Total Reward')
-    plt.show()
+plt.show()

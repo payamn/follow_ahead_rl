@@ -8,7 +8,7 @@ from torch.autograd import Variable
 
 import torchvision
 import gym
-import gym_webots
+import gym_gazebo
 import os
 
 import pickle
@@ -53,15 +53,16 @@ def change_prevdata():
                     pickle.dump(p, f)
 
 if __name__ == '__main__':
-    visualize_data()
-    exit(0)
+    # visualize_data()
+    # exit(0)
     data = []
-    pkl_counter = 2874
-    env = gym.make('webots-v0')
+    pkl_counter = 0
+    env = gym.make('gazebo-v0')
     env.set_robot_to_auto()
     env.resume_simulator()
     prev_obs = env.get_observation()
     time.sleep(1)
+    exit(0)
     prev_goal, prev_angle = env.get_goal_person()
     while(True):
 
