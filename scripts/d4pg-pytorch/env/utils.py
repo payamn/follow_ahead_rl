@@ -4,7 +4,7 @@ import gym
 from .pendulum import PendulumWrapper
 from .bipedal import BipedalWalker
 from .lunar_lander_continous import LunarLanderContinous
-
+from .gazebo_continous import GazeboContinous
 
 def create_env_wrapper(config):
     env = config['env'].lower()
@@ -15,6 +15,6 @@ def create_env_wrapper(config):
     elif env == "lunarlandercontinuous-v2":
         return LunarLanderContinous(config)
     elif env == "gazebo-v0":
-        return LunarLanderContinous(config)
+        return GazeboContinous(config)
     else:
         raise ValueError("Unknown environment.")

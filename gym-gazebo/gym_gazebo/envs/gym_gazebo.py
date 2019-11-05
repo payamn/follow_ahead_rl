@@ -38,14 +38,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 class Manager:
-    def __init__(self):
+    def __init__(self, agent_num):
         self.lock_spin = _thread.allocate_lock()
-        
+        self.agent_num = agent_num
         # self.sdf_file_path = os.path.join(
         #     get_package_share_directory("turtlebot3_gazebo"), "models",
         #     "turtlebot3_burger", "model.sdf")
         self.sdf_file_path = os.path.join("/home/payam/ros2_ws/src/follow_ahead_rl/worlds/", "turtlebot3_burger", "model.sdf")
-        self.node = rclpy.create_node("manager")
+        self.node = rclpy.create_node("manager_{}".format(agent_num))
         self.time = self.node.get_clock()
         self.node.get_logger().debug(
             'Creating Service client_delete to connect to `/delete_entity`')
@@ -145,7 +145,7 @@ class Manager:
         # Set position
         request.state.pose.position.x = float(translation[0])
         request.state.pose.position.y = float(translation[1])
-        request.state.pose.position.z = 0.009
+        request.state.pose.position.z = self.agent_num * 2.5 + 0.19
         # Set orientation
         request.state.pose.orientation.x = quaternion_rotation[3]
         request.state.pose.orientation.y = quaternion_rotation[1]
@@ -175,10 +175,9 @@ class Manager:
         request.robot_namespace = name_space
         request.initial_pose.position.x = float(translation[0])
         request.initial_pose.position.y = float(translation[1])
-        request.initial_pose.position.z = 0.009
+        request.initial_pose.position.z = self.agent_num * 2.5 + 0.19
         # TODO: check euler angle
         quaternion_rotation = euler2quat(0, rotation, 0)
-        print(quaternion_rotation)
         request.initial_pose.orientation.x = quaternion_rotation[3]
         request.initial_pose.orientation.y = quaternion_rotation[1]
         request.initial_pose.orientation.z = quaternion_rotation[2]
@@ -478,11 +477,32 @@ class Robot():
 class GazeboEnv(gym.Env):
 
     def __init__(self):
-        rclpy.init() 
-        self.node = rclpy.create_node("gazebo_env")
+
         self.use_goal = True
-        self.reset_gazebo(no_manager=True)
-        self.manager = Manager()
+
+        self.is_reseting = True
+        self.lock = _thread.allocate_lock()
+        self.robot_mode = 0
+
+        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(17,))
+        # gym.spaces.Tuple(
+        #     (
+        #         gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
+        #         gym.spaces.Box(low=0, high=1, shape=(17,))
+        #     )
+        # )
+        # Action space omits the Tackle/Catch actions, which are useful
+        # on defense
+        self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
+        self.min_distance = 1
+        self.max_distance = 2.5
+        self.max_numb_steps = 2000
+        self.reward_range = [0, 2]
+    def set_agent(self, agent_num):
+        rclpy.init()
+        self.node = rclpy.create_node("gazebo_env_{}".format(agent_num))
+        # self.reset_gazebo(no_manager=True)
+        self.manager = Manager(agent_num)
 
         # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
         # read the path for robot
@@ -492,16 +512,10 @@ class GazeboEnv(gym.Env):
                 self.path = pickle.load(f)
         except Exception as e:
             print(e)
-
-        self.is_reseting = True
-        self.lock = _thread.allocate_lock()
-        self.robot_mode = 0
-        self.create_robots()
+        self.agent_num = agent_num
+        self.create_robots(create_robot_manager=True)
         with self.lock:
             self.init_simulator()
-
-        # self.spin_thread = threading.Thread(target=self.spin, args=())
-        # self.spin_thread.start()
 
     def spin(self):
         while rclpy.ok():
@@ -510,7 +524,7 @@ class GazeboEnv(gym.Env):
             rclpy.spin_once(self.node)
             time.sleep(0.01)
 
-    def create_robots(self):
+    def create_robots(self, create_robot_manager=False):
         idx_start = random.randint(0, len(self.path) - 20)
         self.current_path_idx = idx_start
 
@@ -522,13 +536,18 @@ class GazeboEnv(gym.Env):
             idx_robot += 1
         angle_robot = self.calculate_angle_using_path(idx_robot)
         # manager.create_robot(name, name, init_pos, angle)
-        self.manager.create_robot('my_robot', 'my_robot', self.path[idx_robot], angle_robot)
-        self.manager.create_robot('person', 'person', self.path[idx_start], angle_person)
-        self.robot = Robot('my_robot', init_pos=self.path[idx_robot],  angle=angle_robot, manager=self.manager, node=self.node, max_angular_speed=1.6, max_linear_speed=1.6)
-        self.person = Robot('person', init_pos=self.path[idx_start],  angle=angle_person, manager=self.manager, node=self.node,  max_angular_speed=1.4, max_linear_speed=.9)
+        if create_robot_manager:
+            self.manager.create_robot('my_robot_{}'.format(self.agent_num), 'my_robot_{}'.format(self.agent_num), self.path[idx_robot], angle_robot)
+            self.manager.create_robot('person_{}'.format(self.agent_num), 'person_{}'.format(self.agent_num), self.path[idx_start], angle_person)
+
+        self.robot = Robot('my_robot_{}'.format(self.agent_num), init_pos=self.path[idx_robot],  angle=angle_robot,
+                            manager=self.manager, node=self.node, max_angular_speed=1, max_linear_speed=1)
+        self.person = Robot('person_{}'.format(self.agent_num), init_pos=self.path[idx_start],  angle=angle_person,
+                            manager=self.manager, node=self.node,  max_angular_speed=0.8, max_linear_speed=.8)
         
     def init_simulator(self):
-        
+
+        self.number_of_steps = 0
         self.node.get_logger().debug("init simulation called")
         self.is_reseting = False
         self.is_pause = True
@@ -556,21 +575,7 @@ class GazeboEnv(gym.Env):
         #     print(self.get_angle_person_robot())
         #     time.sleep(0.5)
 
-        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(17,))
-            # gym.spaces.Tuple(
-            #     (
-            #         gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
-            #         gym.spaces.Box(low=0, high=1, shape=(17,))
-            #     )
-            # )
-        # Action space omits the Tackle/Catch actions, which are useful
-        # on defense
-        self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
-        self.min_distance = 1
-        self.max_distance = 2.5
-        self.number_of_steps = 0
-        self.max_numb_steps = 2000
-        self.reward_range = [0, 2]
+
         self.robot.reset = False
         self.person.reset = False
         
@@ -613,7 +618,7 @@ class GazeboEnv(gym.Env):
                 self.node.get_logger().error(" because of exception (in get_person_position heading rel..), {}".format(e))
                 need_reset = True
             if need_reset:
-                self.reset_gazebo()
+                # self.reset_gazebo()
                 not_init = True
                 while not_init:
                     try:
@@ -621,7 +626,7 @@ class GazeboEnv(gym.Env):
                         not_init = False
                     except RuntimeError as e:
                         self.node.get_logger().error("error happend reseting: {}".format(e))
-                        self.reset_gazebo()
+                        # self.reset_gazebo()
 
 
 
@@ -724,7 +729,7 @@ class GazeboEnv(gym.Env):
             time.sleep(0.005)
             counter +=1
             if counter > 10:
-                self.node.get_logger().warn("wait for laser scan to get filled sec: {}/25".format(counter / 10))
+                self.node.get_logger().debug("wait for laser scan to get filled sec: {}/25".format(counter / 10))
         if counter>=250:
             raise RuntimeError(
                 'exception while calling get_laser_scan:')
@@ -773,7 +778,7 @@ class GazeboEnv(gym.Env):
                 got_laser = True
             except Exception as e:
                 self.node.get_logger().error("laser_error reseting")
-                self.reset(reset_gazebo = True)
+                # self.reset(reset_gazebo = True)
             
         poses, headings = self.get_person_position_heading_relative_robot(get_history=True)
         # self.visualize_observation(poses, headings, self.get_laser_scan())
@@ -825,7 +830,7 @@ class GazeboEnv(gym.Env):
             print('max number of steps episode over')
         reward = min(max(reward, -1), 1)
         self.node.get_logger().debug("reward: {} ".format(reward))
-        print (action, reward)
+        print ("agent: {} ".format(self.agent_num),action, reward)
         #reward += 1
         return ob, reward, episode_over, {}
 
@@ -903,8 +908,8 @@ class GazeboEnv(gym.Env):
         self.robot.reset = True
         self.person.reset = True
         self.node.get_logger().debug("trying to get the lock for reset")
-        if reset_gazebo:
-            self.reset_gazebo()
+        # if reset_gazebo:
+        #     self.reset_gazebo()
         with self.lock:
 
             self.node.get_logger().debug("got the lock")

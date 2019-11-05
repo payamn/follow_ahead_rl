@@ -25,6 +25,7 @@ class Agent(object):
 
         # Create environment
         self.env_wrapper = create_env_wrapper(config)
+        self.env_wrapper.env.set_agent(self.n_agent)
         self.ou_noise = OUNoise(dim=config["action_dim"], low=config["action_low"], high=config["action_high"])
         self.ou_noise.reset()
 
