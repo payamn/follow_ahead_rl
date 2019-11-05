@@ -478,7 +478,7 @@ class GazeboEnv(gym.Env):
 
     def __init__(self):
 
-        self.use_goal = True
+        self.use_goal = False
 
         self.is_reseting = True
         self.lock = _thread.allocate_lock()
@@ -890,14 +890,22 @@ class GazeboEnv(gym.Env):
             # Negative reward for being behind the person
             if self.is_collided():
                 reward -= 1
-            if not 90 > angle_robot_person > 0:
-                reward -= distance/6.0
-            elif self.min_distance < distance < self.max_distance:
-                reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
-            elif distance < self.min_distance:
-                reward -= 1 - distance / self.min_distance
-            else:
-                reward -= distance / 7.0
+            if abs(distance - 1.7) < 0.7:
+                reward += 0.1 * (0.7 - abs(distance - 1.7))
+            elif distance >= 1.7:
+                reward -= 0.01 * distance
+            elif distance < 1:
+                reward -= 1 - distance
+            if 90 > angle_robot_person > 0:
+                reward += 0.1 * abs(90 - angle_robot_person) / 45
+            # if not 90 > angle_robot_person > 0:
+            #     reward -= distance/6.0
+            # elif self.min_distance < distance < self.max_distance:
+            #     reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
+            # elif distance < self.min_distance:
+            #     reward -= 1 - distance / self.min_distance
+            # else:
+            #     reward -= distance / 7.0
             reward = min(max(reward, -1), 1)
             # ToDO check for obstacle
         return reward
