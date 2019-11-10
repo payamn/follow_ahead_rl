@@ -1,6 +1,8 @@
+import wandb
+import time
 import gym
 import os
-import gym_webots
+import gym_gazebo
 import logging
 import numpy as np
 import tensorflow as tf
@@ -107,6 +109,7 @@ class A2CAgent:
         observations = [np.empty((batch_sz,) + env.observation_space[0].shape ),
                         np.empty((batch_sz,) + env.observation_space[1].shape)]
         ep_rews = [0.0]
+        env.resume_simulator()
         next_obs = env.get_observation()
         best_losses = float('inf')
         first = True
@@ -118,6 +121,7 @@ class A2CAgent:
                 observations[0][step] = next_obs[0].copy()
                 observations[1][step] = next_obs[1].copy()
                 actions[step], values[step] = self.model.action_value(next_obs[0][None, :], next_obs[1][None, :])
+                # time.sleep(0.1)
                 if first:
                     print(self.model.summary()) # training loop: collect samples, send to optimizer, repeat updates times
                     first = False
@@ -130,6 +134,7 @@ class A2CAgent:
                     next_obs = env.reset()
                     print("reset done")
                     env.resume_simulator()
+                    wandb.log({"reward":ep_rews[-2]})
                     logging.info("Episode: %03d, Reward: %03d " % (len(ep_rews) - 1, ep_rews[-2]))
                     print("Episode: %d, Reward: %f" % (len(ep_rews) - 1, ep_rews[-2]))
                 # print (step, actions[step])
@@ -194,6 +199,8 @@ class A2CAgent:
 
 
 if __name__ == '__main__':
+
+    wandb.init(project="followahead_rl")
     parser = argparse.ArgumentParser(description='input weight file of the network')
     parser.add_argument('--weight', default="weights/bestloses", type=str, help='weight file')
     gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -210,12 +217,14 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     logging.getLogger().setLevel(logging.INFO)
-
-    env = gym.make('webots-v0')
+    print ("before env")
+    env = gym.make('gazebo-v0')
+    print ("after env")
     model = Model(num_actions=env.action_space.n)
 
     if args.weight is not None and os.path.exists(args.weight+".index"):
         model.load_weights(args.weight)
+        print("weight loaded:", args.weight)
     else:
         print("weight not loaded:", args.weight)
 
@@ -229,4 +238,4 @@ if __name__ == '__main__':
     plt.plot(np.arange(0, len(rewards_history), 25), rewards_history[::25])
     plt.xlabel('Episode')
     plt.ylabel('Total Reward')
-    plt.show()
+plt.show()

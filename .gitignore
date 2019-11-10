@@ -4,3 +4,4 @@
 *.swp
 **/weights/*
 **/dataset/*
+**/results/*
