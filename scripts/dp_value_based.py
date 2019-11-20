@@ -4,6 +4,7 @@ import random
 import gym
 import os
 import gym_gazebo
+import cv2 as cv
 import logging
 import numpy as np
 import tensorflow as tf
@@ -12,6 +13,7 @@ import tensorflow.keras.layers as kl
 import tensorflow.keras.losses as kls
 import tensorflow.keras.optimizers as ko
 import threading
+import math
 
 import argparse
 import rclpy
@@ -22,12 +24,22 @@ class DpValueBased:
     def __init__(self):
         self.action_space = 9
         self.Q = np.zeros((100, 100, 72, self.action_space))
+
         self.load_q()
+        # self.visualize()
         self.save_lock = threading.Lock()
         self.depth = 12 # td depth lambda
         self.gamma = 0.8
         self.alpha = 0.0001
         self.max_num_episodes = 10000000
+
+    def visualize(self):
+        q_a = self.Q.argmax(-1)
+        for i in range (self.Q.shape[2]):
+            image = q_a[:,:,i] / 9.
+            print (i/self.Q.shape[2] *360)
+            cv.imshow("image", image)
+            cv.waitKey()
 
     def save_threaded(self):
         thread1 = threading.Thread(target=self.save_q, args=())
@@ -46,6 +58,7 @@ class DpValueBased:
     def get_best_action(self, heading, pos):
         x_index, y_index, degree_index = self.get_index_from_heading_pos(heading, pos)
         actions = self.Q[x_index, y_index, degree_index]
+        print ("actions: {} amax: {} heading: {} pos: {}".format(actions, actions.argmax(), heading, pos))
         return actions.argmax()
 
     def get_index_from_heading_pos(self, heading, pos):
@@ -122,10 +135,11 @@ class DpValueBased:
         while num_episodes < self.max_num_episodes:
             over = False
             env.resume_simulator()
+            rewards = []
             obs_reward = []
             num_episodes += 1
             while not over:
-                if random.random() > 0.3:
+                if random.random() > 0.5:
                     action = random.randint(0, self.action_space-1)
                 else:
                     action = self.get_best_action(heading, pose)
@@ -133,7 +147,9 @@ class DpValueBased:
                 angular, linear = self.action_angular_linear(action)
                 print("before step")
                 observation, reward, over, _ = env.step((linear, angular))
+                heading, pose, person_velocity, robot_velocity = observation
                 obs_reward.append((observation, reward, over, action))
+                rewards.append(reward)
                 if len(obs_reward) > self.depth:
                     self.update_q(obs_reward, len(obs_reward)-self.depth,self.depth)
                     # observation_q, reward, over, action_q = obs_reward[-self.depth]
@@ -150,10 +166,12 @@ class DpValueBased:
                 self.update_q(obs_reward, len(obs_reward) - x, x)
             if num_episodes % 100 == 0:
                 self.save_threaded()
+            wandb.log({"reward": np.average(rewards)})
             print("before reset {}".format(num_episodes))
             env.reset()
 
 if __name__ == '__main__':
+    wandb.init(project="followahead_dp")
     dp = DpValueBased()
     dp.train()
     # wandb.init(project="followahead_rldp")
