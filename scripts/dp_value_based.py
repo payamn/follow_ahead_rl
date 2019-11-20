@@ -33,6 +33,21 @@ class DpValueBased:
         self.alpha = 0.0001
         self.max_num_episodes = 10000000
 
+    """
+    va, vb: linear vel person, robot
+    a, b: angular vel person, robot
+    x1, x2, x3: x, y, angle person-robot
+    h: time
+    
+    return: new x1, x2, x3
+    """
+    @staticmethod
+    def model(va, vb, a, b, x1, x2, x3, h):
+        x1_n = x1 + h * (-va + vb * math.cos(x3) + a * x2)
+        x2_n = x2 + h * (-vb * math.sin(x3) - a * x1)
+        x3_n = x3 + h * (b - a)
+        return x1_n, x2_n, x3_n
+
     def visualize(self):
         q_a = self.Q.argmax(-1)
         for i in range (self.Q.shape[2]):
@@ -52,8 +67,9 @@ class DpValueBased:
             print ("saved")
 
     def load_q(self):
-        print ("loading q")
-        self.Q = np.load("test.npy")
+        if os.path.exists("test.npy"):
+            print ("loading q")
+            self.Q = np.load("test.npy")
 
     def get_best_action(self, heading, pos):
         x_index, y_index, degree_index = self.get_index_from_heading_pos(heading, pos)
@@ -147,7 +163,10 @@ class DpValueBased:
                 angular, linear = self.action_angular_linear(action)
                 print("before step")
                 observation, reward, over, _ = env.step((linear, angular))
+                x = DpValueBased.model(person_velocity[0], robot_velocity[0], person_velocity[1], robot_velocity[1], pose[0], pose[1], heading, 0.05*2.42)
                 heading, pose, person_velocity, robot_velocity = observation
+                print("estimated vs real: x1:{} {} x2:{} {} x3:{} {}".format(x[0], pose[0], x[1], pose[0], x[2], pose[1]))
+
                 obs_reward.append((observation, reward, over, action))
                 rewards.append(reward)
                 if len(obs_reward) > self.depth:
@@ -166,12 +185,12 @@ class DpValueBased:
                 self.update_q(obs_reward, len(obs_reward) - x, x)
             if num_episodes % 100 == 0:
                 self.save_threaded()
-            wandb.log({"reward": np.average(rewards)})
+            #wandb.log({"reward": np.average(rewards)})
             print("before reset {}".format(num_episodes))
             env.reset()
 
 if __name__ == '__main__':
-    wandb.init(project="followahead_dp")
+    #wandb.init(project="followahead_dp")
     dp = DpValueBased()
     dp.train()
     # wandb.init(project="followahead_rldp")
