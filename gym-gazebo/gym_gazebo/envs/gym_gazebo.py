@@ -596,21 +596,21 @@ class GazeboEnv(gym.Env):
     def calculate_angle_using_path(self, idx):
         return math.atan2(self.path[idx+1][1] - self.path[idx][1], self.path[idx+1][0] - self.path[idx][0])
 
-    def get_person_position_heading_relative_robot(self, get_history=False):
+    def get_person_position_heading_relative_robot(self, center_object, relative_object, get_history=False):
         got_position = False
-        person_pos_history = self.person.pos_history.get_elemets()
-        person_orientation_history = self.person.orientation_history.get_elemets()
+        person_pos_history = relative_object.pos_history.get_elemets()
+        person_orientation_history = relative_object.orientation_history.get_elemets()
 
         while not got_position:
             need_reset = False
             try:
-                person_pos_history = self.person.pos_history.get_elemets()
-                person_orientation_history = self.person.orientation_history.get_elemets()
-                person_pos = self.person.get_pos()
-                robot_pos = self.robot.get_pos()
-                person_pos_history = self.person.pos_history.get_elemets()
-                person_orientation_history = self.person.orientation_history.get_elemets()
-                if (len(person_pos_history) == self.person.pos_history.window_size and len(person_orientation_history) == self.person.orientation_history.window_size):
+                person_pos_history = relative_object.pos_history.get_elemets()
+                person_orientation_history = relative_object.orientation_history.get_elemets()
+                person_pos = relative_object.get_pos()
+                robot_pos = center_object.get_pos()
+                person_pos_history = relative_object.pos_history.get_elemets()
+                person_orientation_history = relative_object.orientation_history.get_elemets()
+                if (len(person_pos_history) == relative_object.pos_history.window_size and len(person_orientation_history) == relative_object.orientation_history.window_size):
                     got_position = True
                 else: 
                     self.node.get_logger().warn ("waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
@@ -630,18 +630,18 @@ class GazeboEnv(gym.Env):
 
 
 
-        # person_pos_history = self.person.pos_history.get_elemets()
-        # person_orientation_history = self.person.orientation_history.get_elemets()
+        # person_pos_history = relative_object.pos_history.get_elemets()
+        # person_orientation_history = relative_object.orientation_history.get_elemets()
 
-        # while len(person_pos_history) != self.person.pos_history.window_size or len(person_orientation_history) != self.person.orientation_history.window_size:
+        # while len(person_pos_history) != relative_object.pos_history.window_size or len(person_orientation_history) != relative_object.orientation_history.window_size:
         #     self.node.get_logger().warn ("waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
         #     robot_pos = self.robot.get_pos()
-        #     person_pos_history = self.person.pos_history.get_elemets()
-        #     person_orientation_history = self.person.orientation_history.get_elemets()
+        #     person_pos_history = relative_object.pos_history.get_elemets()
+        #     person_orientation_history = relative_object.orientation_history.get_elemets()
         #     time.sleep(0.1)
 
         person_pos_and_headings = [(person_pos_history[idx][:2] ,np.asarray((person_pos_history[idx][0] + math.cos(person_orientation_history[idx]), person_pos_history[idx][1] + math.sin(person_orientation_history[idx])))) for idx in range (len(person_pos_history)) ]
-        angle_robot = math.pi / 2 - self.robot.orientation
+        angle_robot = math.pi / 2 - center_object.orientation
         rotation_matrix = np.asarray(
             [[math.cos(angle_robot), -math.sin(angle_robot)], [math.sin(angle_robot), math.cos(angle_robot)]])
         poses = []
@@ -668,7 +668,6 @@ class GazeboEnv(gym.Env):
         1: robot will try to go to a point after person
     """
     def path_follower(self, person, idx_start, robot):
-
         counter = 0
         while self.is_pause:
             if self.is_reseting:
@@ -738,16 +737,26 @@ class GazeboEnv(gym.Env):
         images = np.asarray(images)
 
         return (images.reshape((images.shape[1], images.shape[2], images.shape[0])))
+    def get_angle_vec_robot_person(self):
+        pos_person = (0, 1)
+
+        pos_robot = \
+            self.get_person_position_heading_relative_robot(relative_object=self.robot, center_object=self.person)[0]
+        dot = np.dot(pos_person, pos_robot)
+        angle = np.arccos(dot/(np.linalg.norm(pos_robot)*np.linalg.norm(pos_person)))
+        self.node.get_logger().info("pos_person {}, pos_robot {}, dot {}, angle {}".format(pos_person, pos_robot, dot, np.rad2deg(angle)))
+        return np.rad2deg(angle)
 
     def get_angle_person_robot(self):
         orientation_person = self.person.orientation
         angle_robot = self.robot.orientation
-        robot_person_vec = -self.get_person_position_heading_relative_robot()[0]
+        robot_person_vec = -self.get_person_position_heading_relative_robot(relative_object= self.person, center_object= self.robot)[0]
         if orientation_person is None:
             return
         heading_person_vec = np.asarray([math.cos(orientation_person), math.sin(orientation_person)])
         dot = np.dot(robot_person_vec, heading_person_vec)
         angle = math.acos(dot / (np.linalg.norm(heading_person_vec) * np.linalg.norm(robot_person_vec)))
+        self.node.get_logger().info("angle robot {} person {} heading_person {} dot {} ".format(np.rad2deg(angle_robot), np.rad2deg(orientation_person), heading_person_vec, dot))
         return angle * 180 / math.pi
 
     def visualize_observation(self, poses, headings, laser_scans):
@@ -780,7 +789,7 @@ class GazeboEnv(gym.Env):
                 self.node.get_logger().error("laser_error reseting")
                 # self.reset(reset_gazebo = True)
             
-        poses, headings = self.get_person_position_heading_relative_robot(get_history=True)
+        poses, headings = self.get_person_position_heading_relative_robot(relative_object= self.person, center_object= self.robot, get_history=True)
         # self.visualize_observation(poses, headings, self.get_laser_scan())
         orientation_position = np.append(poses, headings)
         velocities = np.asarray([self.person.get_velocity(), self.robot.get_velocity()])
@@ -812,11 +821,11 @@ class GazeboEnv(gym.Env):
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
-        time.sleep(0.02)
+        time.sleep(0.1)
         reward = self.get_reward()
         ob = self.get_observation()
         episode_over = False
-        rel_person = self.get_person_position_heading_relative_robot()[0]
+        rel_person = self.get_person_position_heading_relative_robot(relative_object= self.person, center_object= self.robot)[0]
         distance = math.hypot(rel_person[0], rel_person[1])
         if self.is_collided():
             episode_over = True
@@ -835,7 +844,7 @@ class GazeboEnv(gym.Env):
         return ob, reward, episode_over, {}
 
     def is_collided(self):
-        rel_person = self.get_person_position_heading_relative_robot()[0]
+        rel_person = self.get_person_position_heading_relative_robot(relative_object= self.person, center_object= self.robot)[0]
         distance = math.hypot(rel_person[0], rel_person[1])
         if distance < 0.8 or self.robot.is_collided:
             return True
@@ -874,7 +883,7 @@ class GazeboEnv(gym.Env):
                 p13 = 0.000001
             angle_robot_goal = np.rad2deg(math.acos(max(min((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13), 1), -1)))
             reward += ((60 - angle_robot_goal)/120.0)/2 +0.25 # between -0.25,0.5
-            pos_rel = self.get_person_position_heading_relative_robot()[0]
+            pos_rel = self.get_person_position_heading_relative_robot(relative_object= self.person, center_object= self.robot)[0]
             distance = math.hypot(pos_rel[0], pos_rel[1])
 
             if distance < 1.5:
@@ -884,20 +893,21 @@ class GazeboEnv(gym.Env):
             else: # distance between 1.5 to 2.5
                 reward += 0.5 - abs(distance-2)/2.0 # between 0.25-0.5
         else:
-            pos_rel = self.get_person_position_heading_relative_robot()[0]
+            pos_rel = self.get_person_position_heading_relative_robot(relative_object= self.robot, center_object= self.person)[0]
             distance = math.hypot(pos_rel[0], pos_rel[1])
-            angle_robot_person = self.get_angle_person_robot()
+            angle_robot_person = self.get_angle_vec_robot_person()
+            #angle_robot_person = self.get_angle_person_robot()
             # Negative reward for being behind the person
             if self.is_collided():
                 reward -= 1
             if abs(distance - 1.7) < 0.7:
                 reward += 0.1 * (0.7 - abs(distance - 1.7))
             elif distance >= 1.7:
-                reward -= 0.01 * distance
+                reward -= 0.02 * distance
             elif distance < 1:
                 reward -= 1 - distance
             if 90 > angle_robot_person > 0:
-                reward += 0.1 * abs(90 - angle_robot_person) / 45
+                reward += 0.001 * abs(90 - angle_robot_person) / 45
             # if not 90 > angle_robot_person > 0:
             #     reward -= distance/6.0
             # elif self.min_distance < distance < self.max_distance:
@@ -906,6 +916,7 @@ class GazeboEnv(gym.Env):
             #     reward -= 1 - distance / self.min_distance
             # else:
             #     reward -= distance / 7.0
+            self.node.get_logger().info("reward: {} angle_robot: {} distance: {} pos_rel: {}".format(reward, angle_robot_person, distance, pos_rel))
             reward = min(max(reward, -1), 1)
             # ToDO check for obstacle
         return reward
