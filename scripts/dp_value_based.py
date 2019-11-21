@@ -32,6 +32,7 @@ class DpValueBased:
         self.gamma = 0.8
         self.alpha = 0.0001
         self.max_num_episodes = 10000000
+        self.epsilon_g = 0.0
 
     def visualize(self):
         q_a = self.Q.argmax(-1)
@@ -139,10 +140,10 @@ class DpValueBased:
             obs_reward = []
             num_episodes += 1
             while not over:
-                if random.random() > 0.5:
-                    action = random.randint(0, self.action_space-1)
-                else:
+                if random.random() > self.epsilon_g:
                     action = self.get_best_action(heading, pose)
+                else:
+                    action = random.randint(0, self.action_space-1)
 
                 angular, linear = self.action_angular_linear(action)
                 print("before step")
