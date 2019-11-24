@@ -192,7 +192,7 @@ class Manager:
                 'exception while calling service: %r' % future.exception())
 
     def reset(self):
-        pass    
+        pass
 
 class History():
     def __init__(self, window_size, update_time, manager):
@@ -249,7 +249,7 @@ class Robot():
         self.pos_history = History(5, 1, manager)
         self.pos = (None, None)
         qosProfileSensors = rclpy.qos.qos_profile_sensor_data
-        
+
         self.cmd_vel_pub = self.node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
         self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, qos_profile=qosProfileSensors)
         self.model_states_sub = self.node.create_subscription(ModelStates, '/model_states', self.states_cb, qos_profile=qosProfileSensors)
@@ -262,13 +262,13 @@ class Robot():
         self.is_collided = False
         self.is_pause = False
         self.reset = False
-        self.velocity_window = 3
+        self.velocity_window = 1
         self.velocity_history = np.zeros((self.velocity_window,2))
         self.last_velocity_idx = 0
 
         self.spin_thread = threading.Thread(target=self.spin, args=())
         self.spin_thread.start()
-        
+
 
     def update(self, pos, angle):
         self.manager.move_robot(self.name, self.name, pos, angle)
@@ -334,7 +334,7 @@ class Robot():
 
         self.orientation = euler[0]
         self.orientation_history.add_element(self.orientation)
-        
+
         self.pos_history.add_element(self.pos)
 
         # get velocity
@@ -384,7 +384,7 @@ class Robot():
     def resume(self):
         self.is_pause = False
 
-    # action is two digit number the first one is linear_vel (out of 9) second one is angular_vel (our of 6) 
+    # action is two digit number the first one is linear_vel (out of 9) second one is angular_vel (our of 6)
     def take_action(self, action):
         if self.is_pause:
             return
@@ -436,9 +436,12 @@ class Robot():
             if self.reset:
                 return
             cmd_vel = Twist()
+            linear_vel = 0.5
+            angular_vel = 0.1
             cmd_vel.linear.x = float(linear_vel)
             cmd_vel.angular.z = float(angular_vel)
-            self.cmd_vel_pub.publish(cmd_vel) 
+
+            self.cmd_vel_pub.publish(cmd_vel)
             time.sleep(0.005)
 
         if stop_after_getting:
@@ -539,7 +542,7 @@ class GazeboEnv(gym.Env):
                             manager=self.manager, node=self.node, max_angular_speed=1, max_linear_speed=1)
         self.person = Robot('person_{}'.format(self.agent_num), init_pos=self.path[idx_start],  angle=angle_person,
                             manager=self.manager, node=self.node,  max_angular_speed=0.8, max_linear_speed=.8)
-        
+
     def init_simulator(self):
 
         self.number_of_steps = 0
@@ -573,7 +576,7 @@ class GazeboEnv(gym.Env):
 
         self.robot.reset = False
         self.person.reset = False
-        
+
         # TODO: comment this after start agent
         # self.resume_simulator()
         self.node.get_logger().info("init simulation finished")
@@ -643,7 +646,7 @@ class GazeboEnv(gym.Env):
                 person_orientation_history = self.person.orientation_history.get_elemets()
                 if (len(person_pos_history) == self.person.pos_history.window_size and len(person_orientation_history) == self.person.orientation_history.window_size):
                     got_position = True
-                else: 
+                else:
                     self.node.get_logger().warn ("waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
             except Exception as e:
                 self.node.get_logger().error(" because of exception (in get_person_position heading rel..), {}".format(e))
@@ -704,7 +707,7 @@ class GazeboEnv(gym.Env):
         while self.is_pause:
             if self.is_reseting:
                 self.node.get_logger().info( "path follower return as reseting ")
-                return 
+                return
             time.sleep(0.01)
             if counter > 10000:
                 self.node.get_logger().info( "path follower waiting for pause to be false")
@@ -811,17 +814,17 @@ class GazeboEnv(gym.Env):
                 self.node.get_logger().error("laser_error reseting")
                 # self.reset(reset_gazebo = True)
         heading, pose = self.get_relative_heading_position(self.robot, self.person)
-        print("heading : {} poses: {}".format(np.rad2deg(heading), pose))
+        print("heading : {} poses: {} vel_robot {} vel_person {} ".format(np.rad2deg(heading), pose, self.robot.get_velocity(), self.person.get_velocity()))
         # self.visualize_observation(poses, headings, self.get_laser_scan())
         orientation_position = np.append(pose, heading)
         velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))
-        
+
 #        return np.append(orientation_position, velocities)
         return heading, pose, self.person.get_velocity(), self.robot.get_velocity()
 
 
     def reset_gazebo(self, no_manager=False):
-        
+
         self.node.get_logger().error( "reset gazebo")
         subprocess.call('pkill -9 gzclient', shell=True)
         subprocess.call('tmux kill-session -t gazebo', shell=True)
@@ -917,6 +920,7 @@ class GazeboEnv(gym.Env):
                 reward += 0.5 - abs(distance-2)/2.0 # between 0.25-0.5
         else:
             angle_robot_person, pos_rel = self.get_relative_heading_position(self.robot, self.person)
+            angle_robot_person = math.atan2(pos_rel[1], pos_rel[0])
             angle_robot_person = np.rad2deg(angle_robot_person)
             distance = math.hypot(pos_rel[0], pos_rel[1])
             # Negative reward for being behind the person
