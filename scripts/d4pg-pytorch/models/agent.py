@@ -67,6 +67,7 @@ class Agent(object):
             self.env_wrapper.env.resume_simulator()
             done = False
             while not done:
+                print ("state is {}".format(state))
                 action = self.actor.get_action(state)
                 if self.agent_type == "exploration":
                     action = self.ou_noise.get_action(action, num_steps)

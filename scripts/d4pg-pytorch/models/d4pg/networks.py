@@ -56,7 +56,7 @@ class PolicyNetwork(nn.Module):
         """
         super(PolicyNetwork, self).__init__()
         self.device = device
-
+        print ("numstate {} hidden {}".format(num_states, hidden_size))
         self.linear1 = nn.Linear(num_states, hidden_size)
         self.linear2 = nn.Linear(hidden_size, hidden_size)
         self.linear3 = nn.Linear(hidden_size, num_actions)

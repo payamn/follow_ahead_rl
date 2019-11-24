@@ -1,11 +1,11 @@
 # Environment parameters
 
 env: gazebo-v0
-state_dim: 24
+state_dim: 7
 action_dim: 2
 action_low: -1
 action_high: 1
-num_agents: 4
+num_agents: 3
 random_seed: 2019
 policy_weights: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/best_policy.pt
 value_weights: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/best_value.pt

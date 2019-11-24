@@ -479,7 +479,7 @@ class GazeboEnv(gym.Env):
         self.lock = _thread.allocate_lock()
         self.robot_mode = 0
 
-        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(17,))
+        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(7,))
         # gym.spaces.Tuple(
         #     (
         #         gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
@@ -815,9 +815,10 @@ class GazeboEnv(gym.Env):
         # self.visualize_observation(poses, headings, self.get_laser_scan())
         orientation_position = np.append(pose, heading)
         velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))
-        
+
 #        return np.append(orientation_position, velocities)
-        return heading, pose, self.person.get_velocity(), self.robot.get_velocity()
+
+        return np.append([heading], [pose, self.person.get_velocity(), self.robot.get_velocity()])
 
 
     def reset_gazebo(self, no_manager=False):
@@ -917,6 +918,7 @@ class GazeboEnv(gym.Env):
                 reward += 0.5 - abs(distance-2)/2.0 # between 0.25-0.5
         else:
             angle_robot_person, pos_rel = self.get_relative_heading_position(self.robot, self.person)
+            angle_robot_person = math.atan2(pos_rel[1], pos_rel[0])
             angle_robot_person = np.rad2deg(angle_robot_person)
             distance = math.hypot(pos_rel[0], pos_rel[1])
             # Negative reward for being behind the person
@@ -980,8 +982,8 @@ class GazeboEnv(gym.Env):
                 self.node.get_logger().error("error happend reseting: {}".format(e))
         if not_init:
             return (self.reset())
-        # else:
-        #     return self.get_observation()
+        else:
+             return self.get_observation()
 
     def render(self, mode='human', close=False):
         """ Viewer only supports human mode currently. """
