@@ -135,6 +135,7 @@ class LearnerD4PG(object):
         # -------- Update actor -----------
 
         policy_loss = self.value_net.get_probs(state, self.policy_net(state))
+        print("policy loss: {}".format(policy_loss))
         policy_loss = policy_loss * torch.tensor(self.value_net.z_atoms).float().cuda()
         policy_loss = torch.sum(policy_loss, dim=1)
         policy_loss = -policy_loss.mean()

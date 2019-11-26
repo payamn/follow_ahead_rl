@@ -390,7 +390,7 @@ class Robot():
             return
         # linear_vel = (action%10 - 4) * self.max_linear_vel / 5.0
         # angular_vel = (action//10 - 3) * self.max_angular_vel / 3.0
-        linear_vel = action[0]*self.max_linear_vel
+        linear_vel = (1+action[0])/2*self.max_linear_vel
         angular_vel = action[1]*self.max_angular_vel
         # print ("take action linear {} angular {}".format(linear_vel, angular_vel))
         cmd_vel = Twist()
@@ -436,6 +436,8 @@ class Robot():
             if self.reset:
                 return
             cmd_vel = Twist()
+            linear_vel = 0.5
+            angular_vel = 0.2
             cmd_vel.linear.x = float(linear_vel)
             cmd_vel.angular.z = float(angular_vel)
             self.cmd_vel_pub.publish(cmd_vel) 
@@ -508,7 +510,10 @@ class GazeboEnv(gym.Env):
         except Exception as e:
             print(e)
         self.agent_num = agent_num
-        self.create_robots(create_robot_manager=False)
+        if agent_num >= 4:
+            self.create_robots(create_robot_manager=True)
+        else:
+            self.create_robots(create_robot_manager=False)
         with self.lock:
             self.init_simulator()
 
@@ -927,7 +932,7 @@ class GazeboEnv(gym.Env):
             if abs(distance - 1.7) < 0.7:
                 reward += 0.1 * (0.7 - abs(distance - 1.7))
             elif distance >= 1.7:
-                reward -= 0.01 * distance
+                reward -= 0.25 * (distance - 1.7)
             elif distance < 1:
                 reward -= 1 - distance
             if abs(angle_robot_person) < 45:

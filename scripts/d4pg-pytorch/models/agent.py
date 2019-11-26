@@ -57,17 +57,18 @@ class Agent(object):
             self.local_episode += 1
             self.global_episode.value += 1
             self.exp_buffer.clear()
-
             if self.local_episode % 100 == 0:
                 print(f"Agent: {self.n_agent}  episode {self.local_episode}")
 
             ep_start_time = time.time()
+            print("call reset on agent {}".format(self.n_agent))
             state = self.env_wrapper.reset()
+            print("called reset on agent {}".format(self.n_agent))
             self.ou_noise.reset()
             self.env_wrapper.env.resume_simulator()
             done = False
             while not done:
-                print ("state is {}".format(state))
+                print ("state is {} agent {}".format(state, self.n_agent))
                 action = self.actor.get_action(state)
                 if self.agent_type == "exploration":
                     action = self.ou_noise.get_action(action, num_steps)
@@ -98,12 +99,15 @@ class Agent(object):
                 state = next_state
 
                 if done or num_steps == self.max_steps:
+                    print ("agent {} done".format(self.n_agent))
                     # add rest of experiences remaining in buffer
                     while len(self.exp_buffer) != 0:
+                        print("agent {} exp_buffer_len {}".format(self.n_agent, len(self.exp_buffer)))
                         state_0, action_0, reward_0 = self.exp_buffer.popleft()
                         discounted_reward = reward_0
                         gamma = self.config['discount_rate']
                         for (_, _, r_i) in self.exp_buffer:
+                            print("agent {} exp_buffer_len {}".format(self.n_agent, len(self.exp_buffer)))
                             discounted_reward += r_i * gamma
                             gamma *= self.config['discount_rate']
                         replay_queue.put([state_0, action_0, discounted_reward, next_state, done, gamma])
@@ -111,6 +115,7 @@ class Agent(object):
 
                 num_steps += 1
 
+            print("agent {} finished if".format(self.n_agent))
             # Log metrics
             step = update_step.value
             self.logger.scalar_summary("agent/reward", episode_reward, step)
@@ -127,6 +132,7 @@ class Agent(object):
             if self.agent_type == "exploration" and self.local_episode % self.config['update_agent_ep'] == 0:
                 self.update_actor_learner(learner_w_queue)
 
+            print ("done statring next episode agent: {}".format(self.n_agent))
         while not replay_queue.empty():
             replay_queue.get()
 
