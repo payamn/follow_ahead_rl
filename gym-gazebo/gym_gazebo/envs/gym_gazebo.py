@@ -494,7 +494,7 @@ class GazeboEnv(gym.Env):
         self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
         self.min_distance = 1
         self.max_distance = 2.5
-        self.max_numb_steps = 2000
+        self.max_numb_steps = 20000
         self.reward_range = [0, 2]
     def set_agent(self, agent_num):
         rclpy.init()
