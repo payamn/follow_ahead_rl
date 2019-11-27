@@ -390,6 +390,11 @@ class Robot():
             return
         # linear_vel = (action%10 - 4) * self.max_linear_vel / 5.0
         # angular_vel = (action//10 - 3) * self.max_angular_vel / 3.0
+
+        # linear_vel, angular_vel = self.get_velocity()
+        # linear_vel = ((1 + action[0]) / 2 * self.max_linear_vel + linear_vel) / 2
+        # angular_vel = (action[1] * self.max_angular_vel + angular_vel) / 2
+
         linear_vel = (1+action[0])/2*self.max_linear_vel
         angular_vel = action[1]*self.max_angular_vel
         # print ("take action linear {} angular {}".format(linear_vel, angular_vel))
@@ -410,10 +415,10 @@ class Robot():
         angle = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
         return angle, distance
 
-    def go_to_pos(self, pos, stop_after_getting=False):
+    def go_to_pos(self, pos, stop_after_getting=False, use_random=False):
         distance = 2
         # diff_angle_prev = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
-        while not distance < 1.5:
+        while not distance < 1.5 or use_random:
             if self.is_pause:
                 self.stop_robot()
                 return
@@ -436,11 +441,13 @@ class Robot():
             if self.reset:
                 return
             cmd_vel = Twist()
-            linear_vel = 0.5
-            angular_vel = 0.2
+            if use_random:
+                linear_vel, angular_vel = self.get_velocity()
+                linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
+                angular_vel = angular_vel - (angular_vel - (random.random()-0.5)*2)/2.
             cmd_vel.linear.x = float(linear_vel)
             cmd_vel.angular.z = float(angular_vel)
-            self.cmd_vel_pub.publish(cmd_vel) 
+            self.cmd_vel_pub.publish(cmd_vel)
             time.sleep(0.005)
 
         if stop_after_getting:
@@ -544,7 +551,7 @@ class GazeboEnv(gym.Env):
                             manager=self.manager, node=self.node, max_angular_speed=1, max_linear_speed=1)
         self.person = Robot('person_{}'.format(self.agent_num), init_pos=self.path[idx_start],  angle=angle_person,
                             manager=self.manager, node=self.node,  max_angular_speed=0.8, max_linear_speed=.8)
-        
+
     def init_simulator(self):
 
         self.number_of_steps = 0
@@ -566,6 +573,7 @@ class GazeboEnv(gym.Env):
         self.robot.update(self.path[idx_robot],  angle_robot)
         self.person.update(self.path[idx_start],  angle_person)
         # self.manager.unpause()
+        self.path_finished = False
         self.position_thread = threading.Thread(target=self.path_follower, args=(self.person, idx_start, self.robot,))
         self.position_thread.daemon = True
 
@@ -578,7 +586,7 @@ class GazeboEnv(gym.Env):
 
         self.robot.reset = False
         self.person.reset = False
-        
+
         # TODO: comment this after start agent
         # self.resume_simulator()
         self.node.get_logger().info("init simulation finished")
@@ -648,7 +656,7 @@ class GazeboEnv(gym.Env):
                 person_orientation_history = self.person.orientation_history.get_elemets()
                 if (len(person_pos_history) == self.person.pos_history.window_size and len(person_orientation_history) == self.person.orientation_history.window_size):
                     got_position = True
-                else: 
+                else:
                     self.node.get_logger().warn ("waiting for person_pos_history and orientation to be filled: {} {}".format(len(person_pos_history), len(person_orientation_history)))
             except Exception as e:
                 self.node.get_logger().error(" because of exception (in get_person_position heading rel..), {}".format(e))
@@ -709,7 +717,7 @@ class GazeboEnv(gym.Env):
         while self.is_pause:
             if self.is_reseting:
                 self.node.get_logger().info( "path follower return as reseting ")
-                return 
+                return
             time.sleep(0.01)
             if counter > 10000:
                 self.node.get_logger().info( "path follower waiting for pause to be false")
@@ -730,7 +738,7 @@ class GazeboEnv(gym.Env):
                         return
                     time.sleep(0.1)
                 try:
-                    person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True,))
+                    person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True, True))
                     person_thread.start()
                     # person.go_to_pos(point)
                     if self.robot_mode == 1:
@@ -750,6 +758,7 @@ class GazeboEnv(gym.Env):
                     break
             self.lock.release()
             self.node.get_logger().info("path follower release the lock")
+            self.path_finished = True
         else:
             self.node.get_logger().error("problem in getting the log in path follower")
         # robot.stop_robot()
@@ -827,7 +836,7 @@ class GazeboEnv(gym.Env):
 
 
     def reset_gazebo(self, no_manager=False):
-        
+
         self.node.get_logger().error( "reset gazebo")
         subprocess.call('pkill -9 gzclient', shell=True)
         subprocess.call('tmux kill-session -t gazebo', shell=True)
@@ -856,6 +865,8 @@ class GazeboEnv(gym.Env):
         episode_over = False
         rel_person = self.get_relative_heading_position(self.robot, self.person)[1]
         distance = math.hypot(rel_person[0], rel_person[1])
+        if self.path_finished:
+            episode_over = True
         if self.is_collided():
             episode_over = True
             print('collision happened episode over')
@@ -922,6 +933,7 @@ class GazeboEnv(gym.Env):
             else: # distance between 1.5 to 2.5
                 reward += 0.5 - abs(distance-2)/2.0 # between 0.25-0.5
         else:
+            linear_vel, angular_vel = self.robot.get_velocity()
             angle_robot_person, pos_rel = self.get_relative_heading_position(self.robot, self.person)
             angle_robot_person = math.atan2(pos_rel[1], pos_rel[0])
             angle_robot_person = np.rad2deg(angle_robot_person)
@@ -929,7 +941,9 @@ class GazeboEnv(gym.Env):
             # Negative reward for being behind the person
             if self.is_collided():
                 reward -= 1
-            if abs(distance - 1.7) < 0.7:
+            if distance < 0.3:
+                reward = -1.3
+            elif abs(distance - 1.7) < 0.7:
                 reward += 0.1 * (0.7 - abs(distance - 1.7))
             elif distance >= 1.7:
                 reward -= 0.25 * (distance - 1.7)
@@ -939,6 +953,7 @@ class GazeboEnv(gym.Env):
                 reward += 0.2 * (45 - abs(angle_robot_person)) / 45
             else:
                 reward -= 0.3 * abs(angle_robot_person) / 180
+
             # if not 90 > angle_robot_person > 0:
             #     reward -= distance/6.0
             # elif self.min_distance < distance < self.max_distance:

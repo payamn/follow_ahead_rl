@@ -1,4 +1,5 @@
 import copy
+import time
 from datetime import datetime
 from multiprocessing import set_start_method
 import torch.multiprocessing as torch_mp
@@ -146,6 +147,7 @@ class Engine(object):
 
         for p in processes:
             p.start()
+            #time.sleep(5)
         for p in processes:
             p.join()
 

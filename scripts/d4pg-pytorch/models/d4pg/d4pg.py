@@ -166,9 +166,9 @@ class LearnerD4PG(object):
         self.logger.scalar_summary("learner/learner_update_timing", time.time() - update_time, step)
 
         self.counter += 1
-        if self.counter % 10000 == 0:
+        if self.counter % 1000 == 0:
             print ("saving weights")
-            torch.save(self.policy_net.state_dict(), self.path_weight_policy)
+            torch.save(self.policy_net.state_dict(), self.path_weight_policy+"")
             torch.save(self.value_net.state_dict(), self.path_weight_value)
 
     def run(self, training_on, batch_queue, replay_priority_queue, update_step):
