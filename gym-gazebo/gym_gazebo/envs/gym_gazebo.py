@@ -738,7 +738,7 @@ class GazeboEnv(gym.Env):
                         return
                     time.sleep(0.1)
                 try:
-                    person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True, True))
+                    person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True, False))
                     person_thread.start()
                     # person.go_to_pos(point)
                     if self.robot_mode == 1:
