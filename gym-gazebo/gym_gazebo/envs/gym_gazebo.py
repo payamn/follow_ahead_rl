@@ -391,12 +391,12 @@ class Robot():
         # linear_vel = (action%10 - 4) * self.max_linear_vel / 5.0
         # angular_vel = (action//10 - 3) * self.max_angular_vel / 3.0
 
+        linear_vel = (1+action[0])/2*self.max_linear_vel
+        angular_vel = action[1]*self.max_angular_vel
+
         # linear_vel, angular_vel = self.get_velocity()
         # linear_vel = ((1 + action[0]) / 2 * self.max_linear_vel + linear_vel) / 2
         # angular_vel = (action[1] * self.max_angular_vel + angular_vel) / 2
-
-        linear_vel = (1+action[0])/2*self.max_linear_vel
-        angular_vel = action[1]*self.max_angular_vel
         # print ("take action linear {} angular {}".format(linear_vel, angular_vel))
         cmd_vel = Twist()
         cmd_vel.linear.x = float(linear_vel)
@@ -415,10 +415,10 @@ class Robot():
         angle = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
         return angle, distance
 
-    def go_to_pos(self, pos, stop_after_getting=False, use_random=False):
+    def go_to_pos(self, pos, stop_after_getting=False, person_mode=0):
         distance = 2
         # diff_angle_prev = (angle - self.orientation + math.pi) % (math.pi * 2) - math.pi
-        while not distance < 1.5 or use_random:
+        while not distance < 1.5 or person_mode>0:
             if self.is_pause:
                 self.stop_robot()
                 return
@@ -441,10 +441,26 @@ class Robot():
             if self.reset:
                 return
             cmd_vel = Twist()
-            if use_random:
+            if person_mode == 1:
+                linear_vel = 0.2
+                angular_vel = 0.4
+            elif person_mode == 2:
+                linear_vel = 0.2
+                angular_vel = -0.4
+            elif person_mode == 3:
+                linear_vel = 0.1
+                angular_vel = -0.4
+            elif person_mode == 4:
+                linear_vel = 0.1
+                angular_vel = 0.4
+            elif person_mode == 5:
+                linear_vel = 0
+                angular_vel = 0.5
+            elif person_mode == 6:
                 linear_vel, angular_vel = self.get_velocity()
                 linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
                 angular_vel = angular_vel - (angular_vel - (random.random()-0.5)*2)/2.
+
             cmd_vel.linear.x = float(linear_vel)
             cmd_vel.angular.z = float(angular_vel)
             self.cmd_vel_pub.publish(cmd_vel)
@@ -500,7 +516,7 @@ class GazeboEnv(gym.Env):
         self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
         self.min_distance = 1
         self.max_distance = 2.5
-        self.max_numb_steps = 2000
+        self.max_numb_steps = 200
         self.reward_range = [0, 2]
     def set_agent(self, agent_num):
         rclpy.init()
@@ -550,7 +566,7 @@ class GazeboEnv(gym.Env):
         self.robot = Robot('my_robot_{}'.format(self.agent_num), init_pos=self.path[idx_robot],  angle=angle_robot,
                             manager=self.manager, node=self.node, max_angular_speed=1, max_linear_speed=1)
         self.person = Robot('person_{}'.format(self.agent_num), init_pos=self.path[idx_start],  angle=angle_person,
-                            manager=self.manager, node=self.node,  max_angular_speed=0.8, max_linear_speed=.8)
+                            manager=self.manager, node=self.node,  max_angular_speed=0.5, max_linear_speed=.5)
 
     def init_simulator(self):
 
@@ -726,6 +742,7 @@ class GazeboEnv(gym.Env):
         self.node.get_logger().info( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
         if self.lock.acquire(timeout=10):
             self.node.get_logger().info("path follower got the lock")
+            mode_person = random.randint(0, 6)
             for idx in range (idx_start, len(self.path)-3):
                 point = self.path[idx]
                 self.current_path_idx = idx
@@ -738,7 +755,7 @@ class GazeboEnv(gym.Env):
                         return
                     time.sleep(0.1)
                 try:
-                    person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True, False))
+                    person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True, mode_person))
                     person_thread.start()
                     # person.go_to_pos(point)
                     if self.robot_mode == 1:
@@ -825,7 +842,6 @@ class GazeboEnv(gym.Env):
                 self.node.get_logger().error("laser_error reseting")
                 # self.reset(reset_gazebo = True)
         heading, pose = self.get_relative_heading_position(self.robot, self.person)
-        print("heading : {} poses: {}".format(np.rad2deg(heading), pose))
         # self.visualize_observation(poses, headings, self.get_laser_scan())
         orientation_position = np.append(pose, heading)
         velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))
@@ -869,17 +885,16 @@ class GazeboEnv(gym.Env):
             episode_over = True
         if self.is_collided():
             episode_over = True
-            print('collision happened episode over')
+            self.node.get_logger().debug('collision happened episode over')
             reward -= 0.5
         elif distance > 5:
             episode_over = True
-            print('max distance happened episode over')
+            self.node.get_logger().debug('max distance happened episode over')
         elif self.number_of_steps > self.max_numb_steps:
             episode_over = True
-            print('max number of steps episode over')
+            self.node.get_logger().debug('max number of steps episode over')
         reward = min(max(reward, -1), 1)
-        self.node.get_logger().debug("reward: {} ".format(reward))
-        print ("agent: {} ".format(self.agent_num),action, reward)
+        self.node.get_logger().debug ("agent: {} action {} reward {}".format((self.agent_num),action, reward))
         #reward += 1
         return ob, reward, episode_over, {}
 

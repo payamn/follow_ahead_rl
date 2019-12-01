@@ -7,8 +7,10 @@ action_low: -1
 action_high: 1
 num_agents: 4
 random_seed: 2019
-policy_weights: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/best_policy.pt
-value_weights: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/best_value.pt
+policy_weights: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/
+policy_weights_best: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/policy_best.pt
+value_weights: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/
+value_weights_best: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/value_best.pt
 
 # Training parameters
 
@@ -16,14 +18,14 @@ model: d4pg
 batch_size: 512
 num_steps_train: 4000000_000 # number of episodes from all agents
 max_ep_length: 1000 # maximum number of steps per episode
-replay_mem_size: 10000 # maximum capacity of replay memory
+replay_mem_size: 100000 # maximum capacity of replay memory
 priority_alpha: 0.6 # controls the randomness vs prioritisation of the prioritised sampling (0.0 = Uniform sampling, 1.0 = Greedy prioritisation)
 priority_beta_start: 0.1 # starting value of beta - controls to what degree IS weights influence the gradient updates to correct for the bias introduces by priority sampling (0 - no correction, 1 - full correction)
 priority_beta_end: 0.9 # beta will be linearly annelaed from its start value to this value thoughout training
 discount_rate: 0.95 # Discount rate (gamma) for future rewards
 n_step_returns: 5 # number of future steps to collect experiences for N-step returns
 update_agent_ep: 1 # agent gets latest parameters from learner every update_agent_ep episodes
-replay_queue_size: 1024 # queue with replays from all the agents
+replay_queue_size: 1000# queue with replays from all the agents
 batch_queue_size: 1000 # queue with batches given to learner
 replay_memory_prioritized: 0
 num_episode_save: 10000
@@ -36,7 +38,7 @@ critic_learning_rate: 0.0005
 actor_learning_rate: 0.0005
 dense_size: 400 # size of the 2 hidden layers in networks
 final_layer_init: 0.003
-num_atoms: 151 # number of atoms in output layer of distributed critic
+num_atoms: 251 # number of atoms in output layer of distributed critic
 v_min: -20.0 # lower bound of critic value output distribution
 v_max: 0.0 # upper bound of critic value output distribution
 tau: 0.001 # parameter for soft target network updates

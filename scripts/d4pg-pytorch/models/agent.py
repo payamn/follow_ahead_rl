@@ -1,4 +1,6 @@
 import shutil
+import math
+import numpy as np
 import os
 import time
 from collections import deque
@@ -67,8 +69,9 @@ class Agent(object):
             self.ou_noise.reset()
             self.env_wrapper.env.resume_simulator()
             done = False
+            angle_avg = []
+            distance_avg = []
             while not done:
-                print ("state is {} agent {}".format(state, self.n_agent))
                 action = self.actor.get_action(state)
                 if self.agent_type == "exploration":
                     action = self.ou_noise.get_action(action, num_steps)
@@ -76,7 +79,8 @@ class Agent(object):
                 else:
                     action = action.detach().cpu().numpy().flatten()
                 next_state, reward, done = self.env_wrapper.step(action)
-
+                angle_avg.append(state[0])
+                distance_avg.append(math.hypot(state[1], state[2]))
                 episode_reward += reward
 
                 state = self.env_wrapper.normalise_state(state)
@@ -118,6 +122,11 @@ class Agent(object):
             print("agent {} finished if".format(self.n_agent))
             # Log metrics
             step = update_step.value
+            if self.agent_type == "exploitation":
+                self.logger.scalar_summary("agent/angle", np.rad2deg(np.mean(angle_avg)), step)
+                self.logger.scalar_summary("agent/angle_var", np.rad2deg(np.var(angle_avg)), step)
+                self.logger.scalar_summary("agent/distance", np.mean(distance_avg), step)
+                self.logger.scalar_summary("agent/distance_var", np.var(distance_avg), step)
             self.logger.scalar_summary("agent/reward", episode_reward, step)
             self.logger.scalar_summary("agent/episode_timing", time.time() - ep_start_time, step)
 
@@ -132,9 +141,8 @@ class Agent(object):
             if self.agent_type == "exploration" and self.local_episode % self.config['update_agent_ep'] == 0:
                 self.update_actor_learner(learner_w_queue)
 
-            print ("done statring next episode agent: {}".format(self.n_agent))
-        while not replay_queue.empty():
-            replay_queue.get()
+        # while not replay_queue.empty():
+        #     replay_queue.get()
 
         # Save replay from the first agent only
         # if self.n_agent == 0:

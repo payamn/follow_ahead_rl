@@ -24,6 +24,8 @@ class LearnerD4PG(object):
         action_dim = config['action_dims']
         value_lr = config['critic_learning_rate']
         policy_lr = config['actor_learning_rate']
+        self.best_policy_loss = 10000
+        self.best_value_loss = 10000
         v_min = config['v_min']
         v_max = config['v_max']
         self.path_weight_value = config['value_weights']
@@ -49,8 +51,10 @@ class LearnerD4PG(object):
         self.value_net = ValueNetwork(state_dim, action_dim, hidden_dim, v_min, v_max, num_atoms, device=self.device)
         self.target_value_net = ValueNetwork(state_dim, action_dim, hidden_dim, v_min, v_max, num_atoms, device=self.device)
         if os.path.exists(self.path_weight_value):
-            self.value_net.load_state_dict(torch.load(self.path_weight_value))
+            self.value_net.load_state_dict(torch.load(config['value_weights_best']))
             self.target_value_net = copy.deepcopy(self.value_net)
+        else:
+            print("cannot load value_net: {}".format(config['value_weights_best']))
 
         self.policy_net = policy_net #PolicyNetwork(state_dim, action_dim, hidden_dim, device=self.device)
         self.target_policy_net = target_policy_net
@@ -135,7 +139,6 @@ class LearnerD4PG(object):
         # -------- Update actor -----------
 
         policy_loss = self.value_net.get_probs(state, self.policy_net(state))
-        print("policy loss: {}".format(policy_loss))
         policy_loss = policy_loss * torch.tensor(self.value_net.z_atoms).float().cuda()
         policy_loss = torch.sum(policy_loss, dim=1)
         policy_loss = -policy_loss.mean()
@@ -165,11 +168,19 @@ class LearnerD4PG(object):
         self.logger.scalar_summary("learner/value_loss", value_loss.item(), step)
         self.logger.scalar_summary("learner/learner_update_timing", time.time() - update_time, step)
 
-        self.counter += 1
+        if self.best_policy_loss > policy_loss.item():
+            print("saving best policy loss")
+            self.best_policy_loss = policy_loss.item()
+            torch.save(self.policy_net.state_dict(), self.path_weight_policy + "policy_best.pt")
+        if self.best_value_loss > value_loss.item():
+            print("saving best value loss")
+            self.best_value_loss= value_loss.item()
+            torch.save(self.value_net.state_dict(), self.path_weight_value + "value_best.pt")
         if self.counter % 1000 == 0:
-            print ("saving weights")
-            torch.save(self.policy_net.state_dict(), self.path_weight_policy+"")
-            torch.save(self.value_net.state_dict(), self.path_weight_value)
+            print("saving weights")
+            torch.save(self.policy_net.state_dict(), self.path_weight_policy + "policy.pt")
+            torch.save(self.value_net.state_dict(), self.path_weight_value + "value.pt")
+        self.counter += 1
 
     def run(self, training_on, batch_queue, replay_priority_queue, update_step):
         while update_step.value < self.num_train_steps:
