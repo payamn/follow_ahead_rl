@@ -50,7 +50,7 @@ class LearnerD4PG(object):
         # Value and policy nets
         self.value_net = ValueNetwork(state_dim, action_dim, hidden_dim, v_min, v_max, num_atoms, device=self.device)
         self.target_value_net = ValueNetwork(state_dim, action_dim, hidden_dim, v_min, v_max, num_atoms, device=self.device)
-        if os.path.exists(self.path_weight_value):
+        if os.path.exists(config['value_weights_best']):
             self.value_net.load_state_dict(torch.load(config['value_weights_best']))
             self.target_value_net = copy.deepcopy(self.value_net)
         else:

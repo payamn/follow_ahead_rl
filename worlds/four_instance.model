@@ -2181,7 +2181,7 @@
         </visual>
         <sensor name='hls_lfcd_lds' type='ray'>
           <always_on>1</always_on>
-          <visualize>0</visualize>
+          <visualize>1</visualize>
           <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
           <update_rate>5</update_rate>
           <ray>
@@ -2670,7 +2670,7 @@
         </visual>
         <sensor name='hls_lfcd_lds' type='ray'>
           <always_on>1</always_on>
-          <visualize>0</visualize>
+          <visualize>1</visualize>
           <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
           <update_rate>5</update_rate>
           <ray>
@@ -3159,7 +3159,7 @@
         </visual>
         <sensor name='hls_lfcd_lds' type='ray'>
           <always_on>1</always_on>
-          <visualize>0</visualize>
+          <visualize>1</visualize>
           <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
           <update_rate>5</update_rate>
           <ray>
@@ -3648,7 +3648,7 @@
         </visual>
         <sensor name='hls_lfcd_lds' type='ray'>
           <always_on>1</always_on>
-          <visualize>0</visualize>
+          <visualize>1</visualize>
           <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
           <update_rate>5</update_rate>
           <ray>
@@ -4137,7 +4137,7 @@
         </visual>
         <sensor name='hls_lfcd_lds' type='ray'>
           <always_on>1</always_on>
-          <visualize>0</visualize>
+          <visualize>1</visualize>
           <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
           <update_rate>5</update_rate>
           <ray>
@@ -4626,7 +4626,7 @@
         </visual>
         <sensor name='hls_lfcd_lds' type='ray'>
           <always_on>1</always_on>
-          <visualize>0</visualize>
+          <visualize>1</visualize>
           <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
           <update_rate>5</update_rate>
           <ray>
@@ -5115,7 +5115,7 @@
         </visual>
         <sensor name='hls_lfcd_lds' type='ray'>
           <always_on>1</always_on>
-          <visualize>0</visualize>
+          <visualize>1</visualize>
           <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
           <update_rate>5</update_rate>
           <ray>
@@ -5604,7 +5604,7 @@
         </visual>
         <sensor name='hls_lfcd_lds' type='ray'>
           <always_on>1</always_on>
-          <visualize>0</visualize>
+          <visualize>1</visualize>
           <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
           <update_rate>5</update_rate>
           <ray>

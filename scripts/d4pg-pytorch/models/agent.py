@@ -65,6 +65,7 @@ class Agent(object):
             ep_start_time = time.time()
             print("call reset on agent {}".format(self.n_agent))
             state = self.env_wrapper.reset()
+            print (state.shape)
             print("called reset on agent {}".format(self.n_agent))
             self.ou_noise.reset()
             self.env_wrapper.env.resume_simulator()
