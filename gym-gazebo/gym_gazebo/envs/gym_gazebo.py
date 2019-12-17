@@ -251,6 +251,7 @@ class Robot():
         self.relative_pos_history = History(200, 10, 5, self.manager)
         self.relative_orientation_history = History(200, 10, 5, self.manager)
         self.velocity_history = History(200, 10, 5, self.manager)
+        self.velocity_history.add_element((0,0), self.manager.get_time_sec())
         self.scan_image = None
         self.scan_image_history = History(5, 5, 1, self.manager)
         self.is_collided = False
