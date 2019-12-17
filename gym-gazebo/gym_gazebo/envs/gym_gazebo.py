@@ -429,6 +429,10 @@ class Robot():
                 linear_vel, angular_vel = self.get_velocity()[0]
                 linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
                 angular_vel = angular_vel - (angular_vel - (random.random()-0.5)*2)/2.
+	     elif person_mode == 7:
+                linear_vel = 0.5
+                angular_vel = -0.1
+
 
             cmd_vel.linear.x = float(linear_vel)
             cmd_vel.angular.z = float(angular_vel)
@@ -515,7 +519,8 @@ class GazeboEnv(gym.Env):
         while rclpy.ok():
             while self.is_reseting:
                 time.sleep(0.1)
-            rclpy.spin_once(self.node)
+            with self.manager.lock_spin:
+                rclpy.spin_once(self.node)
             time.sleep(0.01)
 
     def create_robots(self, create_robot_manager=False):
@@ -662,7 +667,7 @@ class GazeboEnv(gym.Env):
         self.node.get_logger().info( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
         if self.lock.acquire(timeout=10):
             self.node.get_logger().info("path follower got the lock")
-            mode_person = 6#random.randint(0, 6)
+            mode_person = 7#random.randint(0, 6)
             for idx in range (idx_start, len(self.path)-3):
                 point = self.path[idx]
                 self.current_path_idx = idx
