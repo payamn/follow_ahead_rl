@@ -7,7 +7,7 @@ import gym
 import math
 import random
 import _thread
-
+# u
 import numpy as np
 import cv2 as cv
 
@@ -26,6 +26,7 @@ from std_srvs.srv import Empty
 from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
+from rosgraph_msgs.msg import Clock
 
 from simple_pid import PID
 
@@ -57,6 +58,8 @@ class Manager:
         self.set_entity_state = self.node.create_client(SetEntityState, "/set_entity_state")
         self.client_pause = self.node.create_client(Empty, "/pause_physics")
         self.client_unpause = self.node.create_client(Empty, "/unpause_physics")
+        self.current_time = None
+
 
     def cleanup(self):
         self.node.destroy_client(self.client_delete )
@@ -66,8 +69,11 @@ class Manager:
         self.node.destroy_node()
 
     def get_time_sec(self):
-        return self.time.now().nanoseconds/1000000000.0
-
+        #return self.time.now().nanoseconds/1000000000.0
+        while self.current_time is None:
+            time.sleep(0.1)
+            self.node.get_logger().warn("waiting for time")
+        return self.current_time
     def remove_object(self, name):
         # self.pause()
         if not self.client_delete.service_is_ready():
@@ -223,9 +229,9 @@ class Robot():
         #self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, qos_profile=qosProfileSensors)
         self.angular_pid = PID(0.1, 0, 0.03, setpoint=0)
         self.linear_pid = PID(0.5, 0, 0.05, setpoint=0)
-        self.relative_pos_history = History(200, 10, 5, manager)
-        self.relative_orientation_history = History(200, 10, 5, manager)
-        self.velocity_history = History(200, 10, 5, manager)
+        self.relative_pos_history = History(200, 10, 2, manager)
+        self.relative_orientation_history = History(200, 10, 2, manager)
+        self.velocity_history = History(200, 10, 2, manager)
         self.scan_image = None
        # self.scan_image_history = History(5, 1, manager)
         self.is_collided = False
@@ -248,9 +254,9 @@ class Robot():
                        'orientation': angle}
         self.angular_pid = PID(0.1, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1, 0, 0.05, setpoint=0)
-        self.relative_pos_history = History(200, 10, 5, self.manager)
-        self.relative_orientation_history = History(200, 10, 5, self.manager)
-        self.velocity_history = History(200, 10, 5, self.manager)
+        self.relative_pos_history = History(200, 10, 2, self.manager)
+        self.relative_orientation_history = History(200, 10, 2, self.manager)
+        self.velocity_history = History(200, 10, 2, self.manager)
         self.velocity_history.add_element((0,0), self.manager.get_time_sec())
         self.scan_image = None
         self.scan_image_history = History(5, 5, 1, self.manager)
@@ -429,7 +435,7 @@ class Robot():
                 linear_vel, angular_vel = self.get_velocity()[0]
                 linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
                 angular_vel = angular_vel - (angular_vel - (random.random()-0.5)*2)/2.
-	     elif person_mode == 7:
+            elif person_mode == 7:
                 linear_vel = 0.5
                 angular_vel = -0.1
 
@@ -461,7 +467,6 @@ class Robot():
             time.sleep(0.1)
         return np.expand_dims(self.scan_image, axis=2)
 
-
 class GazeboEnv(gym.Env):
 
     def __init__(self):
@@ -486,6 +491,7 @@ class GazeboEnv(gym.Env):
         self.max_distance = 2.5
         self.max_numb_steps = 20000
         self.reward_range = [0, 2]
+        self.manager = None
 
     def set_agent(self, agent_num):
         rclpy.init()
@@ -493,6 +499,7 @@ class GazeboEnv(gym.Env):
         # self.reset_gazebo(no_manager=True)
         self.manager = Manager(agent_num)
 
+        self.clock_sub = self.node.create_subscription(Clock, '/clock', self.clock_cb)
         # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
         # read the path for robot
         self.path = []
@@ -508,12 +515,13 @@ class GazeboEnv(gym.Env):
             self.create_robots(create_robot_manager=False)
 
         qosProfileSensors = rclpy.qos.qos_profile_sensor_data
+        self.state_cb_prev_time = None
         self.model_states_sub = self.node.create_subscription(ModelStates, '/model_states', self.states_cb, qos_profile=qosProfileSensors)
+        self.spin_thread = threading.Thread(target=self.spin, args=())
+        self.spin_thread.start()
         with self.lock:
             self.init_simulator()
 
-        self.spin_thread = threading.Thread(target=self.spin, args=())
-        self.spin_thread.start()
 
     def spin(self):
         while rclpy.ok():
@@ -521,7 +529,7 @@ class GazeboEnv(gym.Env):
                 time.sleep(0.1)
             with self.manager.lock_spin:
                 rclpy.spin_once(self.node)
-            time.sleep(0.01)
+            time.sleep(0.001)
 
     def create_robots(self, create_robot_manager=False):
         idx_start = random.randint(0, len(self.path) - 20)
@@ -581,6 +589,13 @@ class GazeboEnv(gym.Env):
         self.node.get_logger().info("init simulation finished")
 
     def states_cb(self, states_msg):
+
+        if self.state_cb_prev_time is None or self.manager.get_time_sec() - self.state_cb_prev_time < 0.1:
+            if self.state_cb_prev_time is None:
+                self.state_cb_prev_time = self.manager.get_time_sec()
+            return
+
+        self.state_cb_prev_time = self.manager.get_time_sec()
         for model_idx in range(len(states_msg.name)):
             if states_msg.name[model_idx] == self.person.name:
                 robot = self.person
@@ -761,11 +776,12 @@ class GazeboEnv(gym.Env):
                 return None
             time.sleep(0.1)
             self.node.get_logger().error("waiting to get pos/vel pos: {} vel: {} vel_person: {}".format(self.robot.relative_pos_history.avg_frame_rate ,self.robot.velocity_history.avg_frame_rate, self.person.velocity_history.avg_frame_rate))
-        pose_history = self.robot.relative_pos_history.get_elemets()
-        heading_history = self.robot.relative_orientation_history.get_elemets()
+        pose_history = np.asarray(self.robot.relative_pos_history.get_elemets()).flatten()/5.0
+        heading_history = np.asarray(self.robot.relative_orientation_history.get_elemets())/math.pi
         # self.visualize_observation(poses, headings, self.get_laser_scan())
         orientation_position = np.append(pose_history, heading_history)
         velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))
+        #self.node.get_logger().info("velociy min: {} max: {} rate_vel: {} avg: {} clock {} vel {}".format(np.min(velocities), np.max(velocities), self.person.velocity_history.avg_frame_rate, self.person.velocity_history.update_rate, self.manager.get_time_sec(), self.person.get_velocity()))
         return np.append(orientation_position, velocities)
 
 
@@ -898,6 +914,10 @@ class GazeboEnv(gym.Env):
             reward = min(max(reward, -1), 1)
             # ToDO check for obstacle
         return reward
+
+    def clock_cb(self, msg):
+        if self.manager is not None:
+            self.manager.current_time = msg.clock.sec + msg.clock.nanosec*0.000000001
 
     def reset(self, reset_gazebo=False):
 

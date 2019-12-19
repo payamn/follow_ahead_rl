@@ -36,7 +36,7 @@ device: cuda
 
 critic_learning_rate: 0.0005
 actor_learning_rate: 0.0005
-dense_size: 400 # size of the 2 hidden layers in networks
+dense_size: 1024 # size of the 2 hidden layers in networks
 final_layer_init: 0.003
 num_atoms: 251 # number of atoms in output layer of distributed critic
 v_min: -20.0 # lower bound of critic value output distribution
