@@ -417,27 +417,27 @@ class Robot():
                 return
             cmd_vel = Twist()
             if person_mode == 1:
-                linear_vel = 0.2
+                linear_vel = 0.4
                 angular_vel = 0.4
             elif person_mode == 2:
-                linear_vel = 0.2
+                linear_vel = 0.4
                 angular_vel = -0.4
             elif person_mode == 3:
-                linear_vel = 0.1
+                linear_vel = 0.2
                 angular_vel = -0.4
             elif person_mode == 4:
-                linear_vel = 0.1
+                linear_vel = 0.2
                 angular_vel = 0.4
             elif person_mode == 5:
-                linear_vel = 0
-                angular_vel = 0.5
+                linear_vel = 0.5
+                angular_vel = 0.0
             elif person_mode == 6:
                 linear_vel, angular_vel = self.get_velocity()[0]
                 linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
                 angular_vel = angular_vel - (angular_vel - (random.random()-0.5)*2)/2.
             elif person_mode == 7:
                 linear_vel = 0.5
-                angular_vel = -0.1
+                angular_vel = -0.5
 
 
             cmd_vel.linear.x = float(linear_vel)
@@ -489,8 +489,8 @@ class GazeboEnv(gym.Env):
         self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
         self.min_distance = 1
         self.max_distance = 2.5
-        self.max_numb_steps = 20000
-        self.reward_range = [0, 2]
+        self.max_numb_steps = 200
+        self.reward_range = [-1, 1]
         self.manager = None
 
     def set_agent(self, agent_num):
@@ -541,7 +541,8 @@ class GazeboEnv(gym.Env):
         while (math.hypot(self.path[idx_robot][1] - self.path[idx_start][1],
                           self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
             idx_robot += 1
-        angle_robot = self.calculate_angle_using_path(idx_robot)
+        angle_robot = random.random()*2*math.pi - math.pi#self.calculate_angle_using_path(idx_robot)
+	
         # manager.create_robot(name, name, init_pos, angle)
         if create_robot_manager:
             self.manager.create_robot('my_robot_{}'.format(self.agent_num), 'my_robot_{}'.format(self.agent_num), self.path[idx_robot], angle_robot)
@@ -551,8 +552,17 @@ class GazeboEnv(gym.Env):
         self.person = Robot('person_{}'.format(self.agent_num), init_pos=self.path[idx_start],  angle=angle_person,
                             manager=self.manager, node=self.node,  max_angular_speed=0.5, max_linear_speed=.5)
 
-        self.robot = Robot('my_robot_{}'.format(self.agent_num), init_pos=self.path[idx_robot], angle=angle_robot,
+        self.robot = Robot('my_robot_{}'.format(self.agent_num), init_pos= self.find_random_point_in_circle(3, 1, self.path[idx_start]), angle=angle_robot,
                             manager=self.manager, node=self.node, max_angular_speed=1, max_linear_speed=1, relative=self.person)
+   
+    def find_random_point_in_circle(self, radious, min_distance, around_point):
+        max_r = 2
+        r = (radious - min_distance) * math.sqrt(random.random()) + min_distance
+        theta = random.random() * 2 * math.pi
+        x_robot = around_point[0] + r * math.cos(theta)
+        y_robot = around_point[1] + r * math.sin(theta)
+        return(x_robot, y_robot)
+
 
     def init_simulator(self):
 
@@ -570,9 +580,9 @@ class GazeboEnv(gym.Env):
         while (math.hypot (self.path[idx_robot][1] - self.path[idx_start][1], self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
             idx_robot += 1
         self.node.get_logger().info("after while init1")
-        angle_robot = self.calculate_angle_using_path(idx_robot)
+        angle_robot = random.random()*2*math.pi - math.pi#self.calculate_angle_using_path(idx_robot)
 
-        self.robot.update(self.path[idx_robot],  angle_robot)
+        self.robot.update(self.find_random_point_in_circle(3, 1, self.path[idx_start]),  angle_robot)
         self.person.update(self.path[idx_start],  angle_person)
 
         self.path_finished = False
@@ -682,7 +692,7 @@ class GazeboEnv(gym.Env):
         self.node.get_logger().info( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
         if self.lock.acquire(timeout=10):
             self.node.get_logger().info("path follower got the lock")
-            mode_person = 7#random.randint(0, 6)
+            mode_person = random.randint(0, 8)
             for idx in range (idx_start, len(self.path)-3):
                 point = self.path[idx]
                 self.current_path_idx = idx
