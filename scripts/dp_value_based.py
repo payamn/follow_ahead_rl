@@ -25,22 +25,22 @@ class DpValueBased:
     def __init__(self):
         self.action_space = 9
         self.Q = np.zeros((50, 50, 36, self.action_space))
-        self.V = np.zeros((50, 50, 36))
-        self.time_interval = 0.2
+        self.V = np.zeros((500, 500, 1))
+        self.time_interval = 0.1
         self.person_velocity = (0.5, 0.1)
         self.use_v = True
-        self.depth = 2  # td depth lambda
+        self.depth = 4  # td depth lambda
         self.gamma = 0.8
         self.alpha = 0.005
         self.max_num_episodes = 10000000
         self.save_lock = threading.Lock()
         self.initialize_v_with_reward()
         number_of_run = 500
-        for i in range (number_of_run):
-            start = time.time()
-            self.update_v()
-            print("time to finish: min {} hours {} i: {}".format(((number_of_run-i) * (time.time()-start))/60, ((number_of_run-i) * (time.time()-start))/60/60, i))
-            self.save_threaded()
+        # for i in range (number_of_run):
+        #     start = time.time()
+        #     self.update_v()
+        #     print("time to finish: min {} hours {} i: {}".format(((number_of_run-i) * (time.time()-start))/60, ((number_of_run-i) * (time.time()-start))/60/60, i))
+        #     self.save_threaded()
         self.visualize_v()
         #self.load_q()
         # self.visualize()
@@ -70,6 +70,13 @@ class DpValueBased:
         for i in range(self.V.shape[2]):
             image = V[:, :, i]  / norm_multiplier
             print(i / self.Q.shape[2] * 360)
+            im = np.array(image * 255, dtype = np.uint8)
+            threshed = cv.adaptiveThreshold(im, 255, cv.ADAPTIVE_THRESH_MEAN_C, cv.THRESH_BINARY, 3, 0)
+            mask_gray = cv.normalize(src=image, dst=None, alpha=0, beta=255, norm_type=cv.NORM_MINMAX, dtype=cv.CV_8UC1)
+
+            image = cv.applyColorMap(mask_gray, cv.COLORMAP_BONE	)
+            image = cv.resize(image, (image.shape[0]*2, image.shape[1]*2))
+
             cv.imshow("image", image)
             cv.waitKey()
 
@@ -116,15 +123,16 @@ class DpValueBased:
         return action
 
     def get_robot_state_from_table(self,x, y, a):
-        heading = a * 2 * math.pi / 36.
-        x1 = (x - self.V.shape[0]/2)/5.
-        x2 = (y - self.V.shape[1]/2)/5.
+        heading = a * 2 * math.pi / self.V.shape[2]
+        x1 = (x - self.V.shape[0]/2)/(self.V.shape[0]/2/5)
+        x2 = (y - self.V.shape[1]/2)/(self.V.shape[1]/2/5)
+
         return x1, x2, heading
 
     def get_index_from_heading_pos(self, heading, pos):
         heading = DpValueBased.zero_2pi(heading)
         degree = np.rad2deg(heading)
-        degree_index = math.floor(degree * 36 / 360.)
+        degree_index = math.floor(degree * self.V.shape[2] / 360.)
         x = min(max(pos[0], -5), 5) + 5
         x_index = math.floor(x * self.V.shape[0]/2/5)
         y = min(max(pos[1], -5), 5) + 5

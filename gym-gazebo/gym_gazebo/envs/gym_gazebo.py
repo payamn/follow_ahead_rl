@@ -375,7 +375,8 @@ class Robot():
 
     def get_velocity(self):
         #TODO: get velocity from robot states
-        return np.mean(self.velocity_history, 0)
+        #return np.mean(self.velocity_history, 0)
+        return self.velocity_history[(self.last_velocity_idx-1)%self.velocity_window]
 
     def pause(self):
         self.is_pause = True
