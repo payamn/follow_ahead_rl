@@ -839,7 +839,7 @@ class GazeboEnv(gym.Env):
             episode_over = True
             self.node.get_logger().debug('max number of steps episode over')
         reward = min(max(reward, -1), 1)
-        self.node.get_logger().debug ("agent: {} action {} reward {}".format((self.agent_num),action, reward))
+        self.node.get_logger().info("agent: {} action {} reward {}".format((self.agent_num),action, reward))
         #reward += 1
         return ob, reward, episode_over, {}
 
@@ -907,11 +907,11 @@ class GazeboEnv(gym.Env):
             elif distance >= 1.7:
                 reward -= 0.25 * (distance - 1.7)
             elif distance < 1:
-                reward -= 1 - distance
+                reward -= (1 - distance)/2.0
             if abs(angle_robot_person) < 45:
                 reward += 0.2 * (45 - abs(angle_robot_person)) / 45
             else:
-                reward -= 0.3 * abs(angle_robot_person) / 180
+                reward -= 0.1 * abs(angle_robot_person) / 180
 
             # if not 90 > angle_robot_person > 0:
             #     reward -= distance/6.0

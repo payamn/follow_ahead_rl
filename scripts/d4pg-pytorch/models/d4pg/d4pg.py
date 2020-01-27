@@ -167,7 +167,9 @@ class LearnerD4PG(object):
         self.logger.scalar_summary("learner/policy_loss", policy_loss.item(), step)
         self.logger.scalar_summary("learner/value_loss", value_loss.item(), step)
         self.logger.scalar_summary("learner/learner_update_timing", time.time() - update_time, step)
-
+        self.counter += 1
+        if self.counter < 100:
+           return 
         if self.best_policy_loss > policy_loss.item():
             print("saving best policy loss")
             self.best_policy_loss = policy_loss.item()
@@ -180,7 +182,6 @@ class LearnerD4PG(object):
             print("saving weights")
             torch.save(self.policy_net.state_dict(), self.path_weight_policy + "policy.pt")
             torch.save(self.value_net.state_dict(), self.path_weight_value + "value.pt")
-        self.counter += 1
 
     def run(self, training_on, batch_queue, replay_priority_queue, update_step):
         while update_step.value < self.num_train_steps:
