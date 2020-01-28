@@ -1,0 +1,58 @@
+<launch>
+  <node ns="local_costmap" name="voxel_grid_throttle" pkg="topic_tools" type="throttle" args="messages voxel_grid 3.0 voxel_grid_throttled" />
+  <param name="/use_sim_time" value="true"/>
+  <arg name="move_base_goal_frequency" default="0.5" />
+  <arg name="base_frame" default="turtlebot2/base_footprint" />
+  <arg name="odom_frame" default="turtlebot2/odom" />
+  <arg name="odom_topic" default="/turtlebot2/odom" />
+  <arg name="map_frame" default="odom" />
+
+
+  <!-- node pkg="gmapping" type="slam_gmapping" name="slam_gmapping" output="screen">
+    <param name="odom_frame" value="$(arg odom_frame)"/>
+    <param name="base_frame" value="$(arg base_frame)"/>
+    <param name="map_frame" value="$(arg map_frame)"/>
+    <param name="map_update_interval" value="0.1"/>
+    <param name="particles" value="40" />
+    <param name="delta" value="0.02"/>
+    <param name="maxRange" value="4"/>
+    <param name="xmin" value="-12"/>
+    <param name="ymin" value="-12"/>
+    <param name="xmax" value="12"/>
+    <param name="ymax" value="12"/>
+    <remap from="/scan" to="/turtlebot2/scan" />
+    <rosparam command="load" file="$(find follow_ahead_baseline)/config_nav/mapper_params.yaml" />
+  </node-->
+  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0 0 0 0 0 0 1 turtlebot2/base_footprint turtlebot2/base_scan 100" />
+  <node pkg="tf" type="static_transform_publisher" name="link2_broadcaster" args="0 0 0 0 0 0 1 odom turtlebot2/odom 100" />
+  <node pkg="tf" type="static_transform_publisher" name="link3_broadcaster" args="0 0 0 0 0 0 1 odom turtlebot1/odom 100" />
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base_node" output="screen">
+    <param name="footprint_padding" value="0.05" />
+    <param name="controller_frequency" value="20.0" />
+    <param name="controller_patience" value="15.0" />
+    <param name="recovery_behavior_enabled" value="true" />
+    <remap from="/cmd_vel" to="/turtlebot2/cmd_vel" />
+
+    <rosparam file="$(find follow_ahead_baseline)/config_nav/costmap_common_params.yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find follow_ahead_baseline)/config_nav/costmap_common_params.yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find follow_ahead_baseline)/config_nav/local_costmap_params.yaml" command="load" />
+    <rosparam file="$(find follow_ahead_baseline)/config_nav/global_costmap_params.yaml" command="load" />
+    
+    <!-- Costmap common param (for both local and global) -->
+        <param name="local_costmap/robot_base_frame" value="$(arg base_frame)" />
+    <param name="global_costmap/robot_base_frame" value="$(arg base_frame)" />
+
+    <!-- Local param -->
+    <param name="TebLocalPlannerROS/odom_topic" value="$(arg odom_topic)" />
+
+    <!-- For default base planner -->
+    <!-- <rosparam file="$(find follow_ahead_baseline)/config_nav_pioneer/base_local_planner_params.yaml" command="load" /> -->
+
+    <!-- For teb base planner -->
+    <rosparam file="$(find follow_ahead_baseline)/config_nav/teb_local_planner_params.yaml" command="load" />
+    <param name="base_local_planner" value="teb_local_planner/TebLocalPlannerROS" />
+
+     <!-- Global planner -->
+    <param name="base_global_planner" value="global_planner/GlobalPlanner" />
+  </node>
+</launch>
