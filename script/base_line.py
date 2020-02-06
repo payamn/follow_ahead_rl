@@ -19,6 +19,9 @@ from geometry_msgs.msg import Twist
 from geometry_msgs.msg import Point
 from geometry_msgs.msg import PoseStamped
 
+from gazebo_msgs.srv import SetModelState
+
+
 
 class Robot:
     def __init__(self, name):
@@ -48,12 +51,18 @@ class Robot:
 class BaseLine:
     def __init__(self):
         rospy.init_node('follow_ahead_base_line', anonymous=True)
+        self.reset = True
         self.robot = Robot("robot")
         self.person = Robot("person")
         self.cmd_vel_pub = rospy.Publisher('/turtlebot1/cmd_vel', Twist, queue_size=10)
         self.simple_goal_pub = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=10)
         self.last_update_goal = rospy.Time.now().to_sec()
         rospy.Subscriber("/gazebo/model_states", ModelStates, self.model_states_cb)
+        x = threading.Thread(target=self.person_tracjetories, args=("person_trajectories",))
+
+
+    def person_tracjetories(self, file_address):
+        pass
 
 
     def model_states_cb(self, msg):
