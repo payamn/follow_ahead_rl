@@ -95,7 +95,6 @@ class Trajectories:
         return model_state
 
 
-
     def parse_trajectory(self, trajectory):
         return
 
@@ -121,10 +120,10 @@ class Trajectories:
                     angle, distance = self.angle_distance_to_point(point)
                     angular_vel = -min(max(self.angular_pid(angle)*10, -self.max_angular_vel),self.max_angular_vel)
                     linear_vel = min(max(self.linear_pid(-distance), -self.max_linear_vel), self.max_linear_vel)
-                    if abs(angle) > math.pi /2:
-                        linear_vel = linear_vel /10.0
-                    elif abs(angular_vel) > self.max_angular_vel/2 and linear_vel > self.max_linear_vel/2:
-                        linear_vel = linear_vel/4
+                    #if abs(angle) > math.pi /2:
+                    linear_vel = linear_vel * math.pow((abs(math.pi - angle)/math.pi), 2)
+                    #elif abs(angular_vel) > self.max_angular_vel/2 and linear_vel > self.max_linear_vel/2:
+                    #    linear_vel = linear_vel/4
 
                     cmd_vel = Twist()
                     cmd_vel.linear.x = float(linear_vel)
@@ -132,7 +131,6 @@ class Trajectories:
                     self.cmd_vel_pub.publish(cmd_vel)
                     print ("pos {} lineavel {} angularvel {} angle {} distance {}".format((self.person.pos.x, self.person.pos.y), linear_vel, angular_vel, angle, distance))
                     rospy.sleep(0.01)
-
 
             name_traj = raw_input('start the next trajectory?')
         print("done all")
