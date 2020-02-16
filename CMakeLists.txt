@@ -15,6 +15,7 @@ find_package(rclcpp REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(gazebo_msgs REQUIRED)
 
 include_directories(
   include
@@ -25,10 +26,10 @@ add_executable(robot
   src/pid.cpp
   src/person_kalman.cpp
   src/robot.cpp)
-ament_target_dependencies(robot rclcpp std_msgs cv_bridge OpenCV)
+ament_target_dependencies(robot rclcpp gazebo_msgs std_msgs cv_bridge OpenCV)
 
 install(TARGETS
-  robot 
+  robot
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

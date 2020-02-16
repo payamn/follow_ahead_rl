@@ -1,5 +1,6 @@
 #include "robot.hpp"
 #include "config.h"
+using std::placeholders::_1;
 
 Robot::Robot(): Node("follow_classic")
 {
@@ -26,7 +27,8 @@ Robot::Robot(): Node("follow_classic")
   // pub_waypoints_ = nh_.advertise<sensor_msgs::PointCloud>("/person_follower/waypoints", 1);
 
   person_kalman_ = new PersonKalman(0.1, Q, R, P);
-  RCLCPP_INFO(this->get_logger(), "%s\n", "hi");
+  states_sub_ = this->create_subscription<gazebo_msgs::msg::ModelStates>(
+    "/model_states", 10, std::bind(&Robot::statesCb, this, _1));
 
 }
 
@@ -34,6 +36,13 @@ Robot::~Robot()
 {
 }
 
+void Robot::statesCb(gazebo_msgs::msg::ModelStates::SharedPtr msg)
+{
+ for (std::string name : msg->name)
+   RCLCPP_INFO(this->get_logger(), "names %s\n", name);
+  //RCLCPP_INFO(this->get_logger(), "pose %s\n", msg->pose);
+  //RCLCPP_INFO(this->get_logger(), "pose %s\n", msg->twist);
+}
 int main(int argc, char * argv[])
 {
   rclcpp::init(argc, argv);
