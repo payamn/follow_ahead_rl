@@ -79,6 +79,10 @@ class Trajectories:
         if mod == "test":
             person_test_thread = threading.Thread(target=self.person_follow_path, args=("person_trajectories.pkl",))
             person_test_thread.start()
+        elif mod == "convert":
+            person_convert_thread = threading.Thread(target=self.convert_to_normal, args=("person_trajectories_rl.pkl",))
+            person_convert_thread.start()
+
         else:
             person_trajectories_thread = threading.Thread(target=self.person_tracjetories_recorder, args=("person_trajectories.pkl",))
             person_trajectories_thread.start()
@@ -104,6 +108,33 @@ class Trajectories:
         distance = math.hypot(pos.x - current_pos.x, pos.y - current_pos.y)
         angle = (angle - self.person.orientation + math.pi) % (math.pi * 2) - math.pi
         return angle, distance
+
+    def convert_to_normal(self, file_address):
+        with open('person_trajectories.pkl', 'rb') as file:
+            trajectories = pickle.load(file)
+        new_trajectories = []
+        for trajectory in trajectories:
+            new_trajectory = {}
+            for name in ["robot", "person"]:
+                pos = trajectory["start_{}".format(name)]["pos"]
+                orientation = trajectory["start_{}".format(name)]["orientation"]
+                new_trajectory["start_{}".format(name)] = {"pos":(pos.x, pos.y), "orientation":orientation}
+            prev = (10,10)
+            new_trajectory["points"] = []
+            for point in trajectory["points"]:
+                new_point = (point.x, point.y)
+                if math.hypot(prev[0]-new_point[0], prev[1] - new_point[1]) < 0.2:
+                    continue
+                else:
+                    new_trajectory["points"].append(new_point)
+                    prev = new_point
+            new_trajectory["name"] = trajectory["name"]
+            new_trajectories.append(new_trajectory)
+        with open( file_address, "wb" ) as file:
+                pickle.dump(new_trajectories, file)
+        print("done")
+        exit(0)
+
 
 
     def person_follow_path(self, file_address):
