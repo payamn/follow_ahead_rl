@@ -104,7 +104,7 @@ class Agent(object):
                 state = next_state
 
                 if done or num_steps == self.max_steps:
-                    print ("agent {} done".format(self.n_agent))
+                    print ("agent {} done steps: {}/{}".format(self.n_agent, num_steps, self.max_steps))
                     # add rest of experiences remaining in buffer
                     while len(self.exp_buffer) != 0:
                         print("agent {} exp_buffer_len {}".format(self.n_agent, len(self.exp_buffer)))

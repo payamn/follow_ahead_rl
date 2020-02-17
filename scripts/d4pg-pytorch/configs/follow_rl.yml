@@ -5,7 +5,7 @@ state_dim: 7
 action_dim: 2
 action_low: -1
 action_high: 1
-num_agents: 4
+num_agents: 1
 random_seed: 2019
 policy_weights: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/
 policy_weights_best: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/policy_best.pt
@@ -16,8 +16,8 @@ value_weights_best: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/valu
 
 model: d4pg
 batch_size: 512
-num_steps_train: 4000000_000 # number of episodes from all agents
-max_ep_length: 1000 # maximum number of steps per episode
+num_steps_train: 40000000000_000 # number of episodes from all agents
+max_ep_length: 1000000000 # maximum number of steps per episode
 replay_mem_size: 100000 # maximum capacity of replay memory
 priority_alpha: 0.6 # controls the randomness vs prioritisation of the prioritised sampling (0.0 = Uniform sampling, 1.0 = Greedy prioritisation)
 priority_beta_start: 0.1 # starting value of beta - controls to what degree IS weights influence the gradient updates to correct for the bias introduces by priority sampling (0 - no correction, 1 - full correction)

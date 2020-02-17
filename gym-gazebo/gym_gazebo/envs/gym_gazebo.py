@@ -25,6 +25,7 @@ from std_srvs.srv import Empty
 
 from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Twist
+from geometry_msgs.msg import Point
 from sensor_msgs.msg import LaserScan
 from rosgraph_msgs.msg import Clock
 
@@ -91,7 +92,8 @@ class Manager:
             raise RuntimeError(
                 'exception while calling service: %r' % future.exception())
 
-    def move_robot(self, name, name_space, translation, rotation):
+    def move_robot(self, name, name_space, pos_rotation):
+        translation, rotation= pos_rotation["pos"], pos_rotation["orientation"]
         # self.remove_object(name)
         # self.node.get_logger().info("Connecting to `/set_entity_state` service...")
         if not self.set_entity_state.service_is_ready():
@@ -123,7 +125,8 @@ class Manager:
             raise RuntimeError(
                 'exception while calling set_entity state: {} name: {}'.format( future.exception(), name))
 
-    def create_robot(self, name, name_space, translation, rotation):
+    def create_robot(self, name, name_space, pos_rotation):
+        translation, rotation= pos_rotation["pos"], pos_rotation["orientation"]
         # self.remove_object(name)
         # self.node.get_logger().info("Connecting to `/spawn_entity` service...")
         if not self.client_spawn.service_is_ready():
@@ -154,7 +157,7 @@ class Manager:
                 'exception while calling service: %r' % future.exception())
 
     def reset(self):
-        pass    
+        pass
 
 class History():
     def __init__(self, memory_size, window_size, rate, manager):
@@ -203,9 +206,9 @@ class History():
         return return_data
 
 class Robot():
-    def __init__(self, name, init_pos, angle, manager, node, max_angular_speed=1, max_linear_speed=1, relative=None):
+    def __init__(self, name, init_pos, manager, node, max_angular_speed=1, max_linear_speed=1, relative=None):
         # manager.create_robot(name, name, init_pos, angle)
-        manager.move_robot(name, name, init_pos, angle)
+        manager.move_robot(name, name, init_pos)
         #time.sleep(5)
         self.name = name
         self.manager = manager
@@ -223,12 +226,12 @@ class Robot():
         self.width_laserelement_image = 100
         self.height_laser_image = 50
         self.state_ = {'position':      (None, None),
-                       'orientation':   angle}
+                       'orientation':   init_pos["orientation"]}
 
         self.cmd_vel_pub = self.node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
         #self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, qos_profile=qosProfileSensors)
-        self.angular_pid = PID(0.1, 0, 0.03, setpoint=0)
-        self.linear_pid = PID(0.5, 0, 0.05, setpoint=0)
+        self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
+        self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
         self.relative_pos_history = History(200, 10, 2, manager)
         self.relative_orientation_history = History(200, 10, 2, manager)
         self.velocity_history = History(200, 10, 2, manager)
@@ -247,13 +250,14 @@ class Robot():
                 self.relative_orientation_history.avg_frame_rate is not None and\
                 self.velocity_history.avg_frame_rate is not None)
 
-    def update(self, pos, angle):
-        self.manager.move_robot(self.name, self.name, pos, angle)
+    def update(self, pos_angle):
+
+        self.manager.move_robot(self.name, self.name, pos_angle)
         self.alive = True
         self.state_ = {'position': (None, None),
-                       'orientation': angle}
-        self.angular_pid = PID(0.1, 0, 0.03, setpoint=0)
-        self.linear_pid = PID(1, 0, 0.05, setpoint=0)
+                       'orientation': pos_angle["orientation"]}
+        self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
+        self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
         self.relative_pos_history = History(200, 10, 2, self.manager)
         self.relative_orientation_history = History(200, 10, 2, self.manager)
         self.velocity_history = History(200, 10, 2, self.manager)
@@ -363,16 +367,15 @@ class Robot():
     def resume(self):
         self.is_pause = False
 
-    # action is two digit number the first one is linear_vel (out of 9) second one is angular_vel (our of 6) 
+    # action is two digit number the first one is linear_vel (out of 9) second one is angular_vel (our of 6)
     def take_action(self, action):
         if self.is_pause:
             return
         # linear_vel = (action%10 - 4) * self.max_linear_vel / 5.0
         # angular_vel = (action//10 - 3) * self.max_angular_vel / 3.0
 
-        linear_vel = (1+action[0])/2*self.max_linear_vel
-        angular_vel = action[1]*self.max_angular_vel
-
+        linear_vel = max(min((1+action[0])/2., self.max_linear_vel), 0)
+        angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
         # linear_vel, angular_vel = self.get_velocity()
         # linear_vel = ((1 + action[0]) / 2 * self.max_linear_vel + linear_vel) / 2
         # angular_vel = (action[1] * self.max_angular_vel + angular_vel) / 2
@@ -395,9 +398,16 @@ class Robot():
         return angle, distance
 
     def go_to_pos(self, pos, stop_after_getting=False, person_mode=0):
-        distance = 2
-
-        while not distance < 1.5 or person_mode>0:
+        print ("pause {} reset {}".format(self.is_pause, self.reset))
+        if self.is_pause:
+            self.stop_robot()
+            return
+        if self.reset:
+            return
+        diff_angle, distance = self.angle_distance_to_point(pos)
+        print("dist: {}angle: {}".format(distance, np.rad2deg(diff_angle)))
+        time_prev = self.manager.get_time_sec()
+        while (not distance < 0.2 and abs(self.manager.get_time_sec() - time_prev) < 5) or person_mode>0  :
             if self.is_pause:
                 self.stop_robot()
                 return
@@ -407,12 +417,10 @@ class Robot():
             if distance is None:
                 return
 
-            angular_vel = -min(max(self.angular_pid(diff_angle)*3, -self.max_angular_vel),self.max_angular_vel)
+            angular_vel = -min(max(self.angular_pid(diff_angle)*10, -self.max_angular_vel),self.max_angular_vel)
             linear_vel = min(max(self.linear_pid(-distance), -self.max_linear_vel), self.max_linear_vel)
-            if abs(diff_angle) > math.pi /2:
-                linear_vel = linear_vel /20.0
-            elif abs(angular_vel) > self.max_angular_vel/2 and linear_vel > self.max_linear_vel/2:
-                linear_vel = linear_vel/4
+            linear_vel = min(linear_vel * math.pow((abs(math.pi - diff_angle)/math.pi), 2), linear_vel)
+
             if self.reset:
                 return
             cmd_vel = Twist()
@@ -443,7 +451,7 @@ class Robot():
             cmd_vel.linear.x = float(linear_vel)
             cmd_vel.angular.z = float(angular_vel)
             self.cmd_vel_pub.publish(cmd_vel)
-            time.sleep(0.005)
+            time.sleep(0.01)
 
         if stop_after_getting:
             self.stop_robot()
@@ -469,9 +477,10 @@ class Robot():
 
 class GazeboEnv(gym.Env):
 
-    def __init__(self):
+    def __init__(self, is_evaluation=True):
 
         self.use_goal = False
+        self.is_evaluation_ = is_evaluation
 
         self.is_reseting = True
         self.lock = _thread.allocate_lock()
@@ -489,7 +498,10 @@ class GazeboEnv(gym.Env):
         self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
         self.min_distance = 1
         self.max_distance = 2.5
-        self.max_numb_steps = 200
+        if self.is_evaluation_:
+           self.max_numb_steps = 1000000000000000000
+        else:
+            self.max_numb_steps = 200
         self.reward_range = [-1, 1]
         self.manager = None
 
@@ -502,10 +514,27 @@ class GazeboEnv(gym.Env):
         self.clock_sub = self.node.create_subscription(Clock, '/clock', self.clock_cb)
         # use goal from current path to calculate reward if false use a the heading and relative position  to calculate reward
         # read the path for robot
-        self.path = []
+        self.path = {}
+        self.paths = []
         try:
-            with open('data/first', 'rb') as f:
-                self.path = pickle.load(f)
+            with open('data/person_trajectories_rl.pkl', 'rb') as f:
+                paths = pickle.load(f)
+                for path in paths:
+                    angle_person = path['start_person']['orientation']
+                    for angle in [x for x in range(0, 360, 10)]:
+                        for angle_robot_person in [x for x in range(0, 360, 90)]:
+                            path_angle = path.copy()
+                            angle_from_person = np.deg2rad(angle) + angle_person
+                            angle_person_robot = np.deg2rad(angle_robot_person) + angle_person
+                            path_angle['start_robot']['pos'] = (path_angle['start_person']['pos'][0] + math.cos(angle_from_person)*2, path_angle['start_person']['pos'][1] + math.sin(angle_from_person)*2)
+
+                            path_angle['start_robot']['orientation'] = angle_person_robot
+                            path_angle['name'] = path['name'] + " " + str(angle) +" " + str(angle_robot_person)
+                            self.paths.append(path_angle)
+
+                self.path_idx = 0
+                self.path = self.paths[self.path_idx]
+                print ("done setting path")
         except Exception as e:
             print(e)
         self.agent_num = agent_num
@@ -531,37 +560,48 @@ class GazeboEnv(gym.Env):
                 rclpy.spin_once(self.node)
             time.sleep(0.001)
 
-    def create_robots(self, create_robot_manager=False):
-        idx_start = random.randint(0, len(self.path) - 20)
+    def get_init_pos_robot_person(self):
+        if self.is_evaluation_:
+            idx_start = 0
+        else:
+            print (self.path)
+            idx_start = random.randint(0, len(self.path["points"]) - 20)
         self.current_path_idx = idx_start
 
-        init_pos_person = self.path[idx_start]
-        angle_person = self.calculate_angle_using_path(idx_start)
-        idx_robot = idx_start + 1
-        while (math.hypot(self.path[idx_robot][1] - self.path[idx_start][1],
-                          self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
-            idx_robot += 1
-        angle_robot = random.random()*2*math.pi - math.pi#self.calculate_angle_using_path(idx_robot)
-	
-        # manager.create_robot(name, name, init_pos, angle)
+        if self.is_evaluation_:
+            init_pos_person = self.path["start_person"]
+            init_pos_robot = self.path["start_robot"]
+        else:
+            init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
+            # idx_robot = idx_start + 1
+            # while (math.hypot(self.path["points"][idx_robot].y - self.path["points"][idx_start].y,
+            #                   self.path["points"][idx_robot].x - self.path["points"][idx_start].x) < 1.6):
+            #     idx_robot += 1
+            init_pos_robot = {"pos": self.find_random_point_in_circle(3, 1, self.path["points"][idx_start]),\
+                              "orientation": random.random()*2*math.pi - math.pi}
+        return init_pos_robot, init_pos_person
+
+
+    def create_robots(self, create_robot_manager=False):
+        init_pos_robot, init_pos_person = self.get_init_pos_robot_person()
         if create_robot_manager:
-            self.manager.create_robot('my_robot_{}'.format(self.agent_num), 'my_robot_{}'.format(self.agent_num), self.path[idx_robot], angle_robot)
-            self.manager.create_robot('person_{}'.format(self.agent_num), 'person_{}'.format(self.agent_num), self.path[idx_start], angle_person)
+            self.manager.create_robot('my_robot_{}'.format(self.agent_num), 'my_robot_{}'.format(self.agent_num), init_pos_robot)
+            self.manager.create_robot('person_{}'.format(self.agent_num), 'person_{}'.format(self.agent_num), init_pos_person)
 
 
-        self.person = Robot('person_{}'.format(self.agent_num), init_pos=self.path[idx_start],  angle=angle_person,
-                            manager=self.manager, node=self.node,  max_angular_speed=0.5, max_linear_speed=.5)
+        self.person = Robot('person_{}'.format(self.agent_num), init_pos= init_pos_person,
+                            manager=self.manager, node=self.node,  max_angular_speed=0.25, max_linear_speed=.25)
 
-        self.robot = Robot('my_robot_{}'.format(self.agent_num), init_pos= self.find_random_point_in_circle(3, 1, self.path[idx_start]), angle=angle_robot,
-                            manager=self.manager, node=self.node, max_angular_speed=1, max_linear_speed=1, relative=self.person)
-   
+        self.robot = Robot('my_robot_{}'.format(self.agent_num), init_pos= init_pos_robot,
+                            manager=self.manager, node=self.node, max_angular_speed=0.5, max_linear_speed=0.5, relative=self.person)
+
     def find_random_point_in_circle(self, radious, min_distance, around_point):
         max_r = 2
         r = (radious - min_distance) * math.sqrt(random.random()) + min_distance
         theta = random.random() * 2 * math.pi
-        x_robot = around_point[0] + r * math.cos(theta)
-        y_robot = around_point[1] + r * math.sin(theta)
-        return(x_robot, y_robot)
+        x = around_point[0] + r * math.cos(theta)
+        y = around_point[1] + r * math.sin(theta)
+        return (x, y)
 
 
     def init_simulator(self):
@@ -570,23 +610,13 @@ class GazeboEnv(gym.Env):
         self.node.get_logger().info("init simulation called")
         self.is_reseting = False
         self.is_pause = True
-        idx_start = random.randint(0, len(self.path)-20)
-        self.current_path_idx = idx_start
 
-        init_pos_person = self.path[idx_start]
-        angle_person = self.calculate_angle_using_path(idx_start)
-        idx_robot = idx_start + 1
-        self.node.get_logger().info("before while init")
-        while (math.hypot (self.path[idx_robot][1] - self.path[idx_start][1], self.path[idx_robot][0] - self.path[idx_start][0]) < 1.6):
-            idx_robot += 1
-        self.node.get_logger().info("after while init1")
-        angle_robot = random.random()*2*math.pi - math.pi#self.calculate_angle_using_path(idx_robot)
-
-        self.robot.update(self.find_random_point_in_circle(3, 1, self.path[idx_start]),  angle_robot)
-        self.person.update(self.path[idx_start],  angle_person)
+        init_pos_robot, init_pos_person = self.get_init_pos_robot_person()
+        self.robot.update(init_pos_robot)
+        self.person.update(init_pos_person)
 
         self.path_finished = False
-        self.position_thread = threading.Thread(target=self.path_follower, args=(self.person, idx_start, self.robot,))
+        self.position_thread = threading.Thread(target=self.path_follower, args=(self.current_path_idx, self.robot,))
         self.position_thread.daemon = True
 
         self.position_thread.start()
@@ -646,7 +676,7 @@ class GazeboEnv(gym.Env):
         self.node.get_logger().info("resumed simulator")
 
     def calculate_angle_using_path(self, idx):
-        return math.atan2(self.path[idx+1][1] - self.path[idx][1], self.path[idx+1][0] - self.path[idx][0])
+        return math.atan2(self.path["points"][idx+1][1] - self.path["points"][idx][1], self.path["points"][idx+1][0] - self.path["points"][idx][0])
 
     @staticmethod
     def get_relative_heading_position(relative, center, node):
@@ -677,7 +707,7 @@ class GazeboEnv(gym.Env):
         0: will not move robot
         1: robot will try to go to a point after person
     """
-    def path_follower(self, person, idx_start, robot):
+    def path_follower(self, idx_start, robot):
 
         counter = 0
         while self.is_pause:
@@ -692,9 +722,12 @@ class GazeboEnv(gym.Env):
         self.node.get_logger().info( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
         if self.lock.acquire(timeout=10):
             self.node.get_logger().info("path follower got the lock")
-            mode_person = random.randint(0, 8)
-            for idx in range (idx_start, len(self.path)-3):
-                point = self.path[idx]
+            if self.is_evaluation_:
+                mode_person = 0
+            else:
+                mode_person = random.randint(0, 8)
+            for idx in range (idx_start, len(self.path["points"])-3):
+                point = (self.path["points"][idx][0], self.path["points"][idx][1])
                 self.current_path_idx = idx
                 counter_pause = 0
                 while self.is_pause:
@@ -703,26 +736,26 @@ class GazeboEnv(gym.Env):
                     if self.is_reseting or counter_pause > 200:
                         self.lock.release()
                         return
-                    kime.sleep(0.1)
+                    time.sleep(0.1)
                 try:
-                    person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True, mode_person))
-                    person_thread.start()
-                    # person.go_to_pos(point)
-                    if self.robot_mode == 1:
-                        noisy_point = (self.path[idx+3][0] +min(max(np.random.normal(),-0.5),0.5), self.path[idx+3][1] +min(max(np.random.normal(),-0.5),0.5))
+                    self.person.go_to_pos(point, True, mode_person)
+                    # person_thread = threading.Thread(target=self.person.go_to_pos, args=(point, True, mode_person))
+                    # person_thread.start()
+                    # if self.robot_mode == 1:
+                    #     noisy_point = (self.path["points"][idx+3][0] +min(max(np.random.normal(),-0.5),0.5), self.path["points"][idx+3][1] +min(max(np.random.normal(),-0.5),0.5))
 
-                        robot_thread = threading.Thread(target=self.robot.go_to_pos, args=(noisy_point,True,))
-                        robot_thread.start()
-                        robot_thread.join()
+                    #     robot_thread = threading.Thread(target=self.robot.go_to_pos, args=(noisy_point,True,))
+                    #     robot_thread.start()
+                    #     robot_thread.join()
 
-                    person_thread.join()
+                    # person_thread.join()
 
                 except Exception as e:
                     self.node.get_logger().warn("path follower {}, {}".format(self.is_reseting, e))
                     break
-                self.node.get_logger().debug("got to point: {} out of {}".format(idx - idx_start, len(self.path) - idx_start ))
+                self.node.get_logger().debug("got to point: {} out of {}".format(idx - idx_start, len(self.path["points"]) - idx_start ))
                 if self.is_reseting:
-                    person.stop_robot()
+                    self.person.stop_robot()
                     break
             self.lock.release()
             self.node.get_logger().info("path follower release the lock")
@@ -827,17 +860,18 @@ class GazeboEnv(gym.Env):
 
         distance = math.hypot(rel_person[0], rel_person[1])
         if self.path_finished:
+            self.node.get_logger().info("path finished")
             episode_over = True
         if self.is_collided():
             episode_over = True
-            self.node.get_logger().debug('collision happened episode over')
+            self.node.get_logger().info('collision happened episode over')
             reward -= 0.5
         elif distance > 5:
             episode_over = True
-            self.node.get_logger().debug('max distance happened episode over')
+            self.node.get_logger().info('max distance happened episode over')
         elif self.number_of_steps > self.max_numb_steps:
             episode_over = True
-            self.node.get_logger().debug('max number of steps episode over')
+            self.node.get_logger().info('max number of steps episode over')
         reward = min(max(reward, -1), 1)
         self.node.get_logger().info("agent: {} action {} reward {}".format((self.agent_num),action, reward))
         #reward += 1
@@ -854,9 +888,9 @@ class GazeboEnv(gym.Env):
         pos_person = self.person.get_pos()
         pos_goal = None
         angle_distance = None
-        for idx in range(self.current_path_idx + 1, len(self.path) - 3):
-            if math.hypot(pos_person[0]-self.path[idx][0], pos_person[1]-self.path[idx][1]) > 3:
-                pos_goal = self.path[idx]
+        for idx in range(self.current_path_idx + 1, len(self.path["points"]) - 3):
+            if math.hypot(pos_person[0]-self.path["points"][idx][0], pos_person[1]-self.path["points"][idx][1]) > 3:
+                pos_goal = (self.path[idx][0], self.path[idx][1])
                 angle_distance= self.robot.angle_distance_to_point(pos_goal)
                 break
         return pos_goal, angle_distance
@@ -864,7 +898,7 @@ class GazeboEnv(gym.Env):
     def get_reward(self):
         reward = 0
         if self.use_goal:
-            point_goal = self.path[self.current_path_idx + 1]
+            point_goal = (self.path["points"][self.current_path_idx + 1][0], self.path["points"][self.current_path_idx + 1][1])
             try:
                 pos_robot = self.robot.get_pos()
             except Exception as e:
@@ -959,6 +993,14 @@ class GazeboEnv(gym.Env):
                     self.node.get_logger().info("wait for position thread to join")
                     self.position_thread.join()
                     self.node.get_logger().info("position thread joined")
+                if self.is_evaluation_:
+                    self.path_idx += 1
+                    if self.path_idx < len(self.paths)-1:
+                        self.path = self.paths[self.path_idx]
+                    else:
+                        print ("all done")
+                        self.person.stop_robot()
+                        exit(0)
                 self.init_simulator()
                 not_init = False
             except RuntimeError as e:
@@ -981,7 +1023,7 @@ def test_env():
     manager = Manager()
     robot = Robot('my_robot', init_pos=(4,4,4),  angle=0, manager=manager)
     while rclpy.ok():
-        
+
         rclpy.spin_once(node)
     exit()
 
