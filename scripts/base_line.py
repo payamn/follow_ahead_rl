@@ -1,8 +1,6 @@
-from gym.utils import seeding
 
 import os, subprocess, time, signal
 
-import gym
 import math
 import random
 # u
@@ -40,7 +38,20 @@ class LogParser():
                 # plt.plot([x[0] for x in log_unpacked["robot_history"]],[x[1] for x in log_unpacked["robot_history"]] ,'ro',  linewidth=0.1, markersize=1)
                 # plt.plot([x[0] for x in log_unpacked["person_history"]],[x[1] for x in log_unpacked["person_history"]] ,'bo',  linewidth=0.1, markersize=1)
 
-                angle_relative, relative_pos get_relative_heading_position(
+                angle_relatives = []
+                distances = []
+                relative_poses = []
+                for i in range(len(log_unpacked["robot_history"])):
+                    angle_relative, relative_pos = get_relative_heading_position(log_unpacked["robot_history"][i], log_unpacked["person_history"][i])
+                    relative_poses.append(relative_pos)
+                    distances.append(math.hypot(relative_pos[0], relative_pos[1]))
+                    angle_relatives.append(np.rad2deg(angle_relative))
+                plt.subplot(4, 1, 1)
+                plt.plot(angle_relatives)
+                plt.subplot(3, 1, 2)
+                plt.plot(distances)
+                plt.subplot(3, 1, 3)
+                plt.plot(relative_poses)
                 plt.show()
 
 
@@ -321,7 +332,7 @@ class Robot():
             time.sleep(0.1)
         return np.expand_dims(self.scan_image, axis=2)
 
-class GazeboEnv(gym.Env):
+class GazeboEnv():
 
     def __init__(self, is_evaluation=True):
 
@@ -868,5 +879,5 @@ class GazeboEnv(gym.Env):
     def render(self, mode='human', close=False):
         """ Viewer only supports human mode currently. """
         return
-LogParser("/home/payam/ros2_ws/src/follow_ahead_rl/scripts/data_test")
+LogParser("/tmp/follow_ahead_rl/scripts/data_test")
 # gazebo = GazeboEnv()
