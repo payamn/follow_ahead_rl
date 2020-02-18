@@ -3,207 +3,47 @@ from gym.utils import seeding
 import os, subprocess, time, signal
 
 import gym
-
 import math
 import random
-import _thread
 # u
 import numpy as np
 import cv2 as cv
-
-import rclpy
-
-from squaternion import quat2euler
-from squaternion import euler2quat
-
-from ament_index_python.packages import get_package_share_directory
-
-from gazebo_msgs.srv import SpawnEntity
-from gazebo_msgs.srv import DeleteEntity
-from gazebo_msgs.srv import SetEntityState
-from std_srvs.srv import Empty
-
-from gazebo_msgs.msg import ModelStates
-from geometry_msgs.msg import Twist
-from geometry_msgs.msg import Point
-from sensor_msgs.msg import LaserScan
-from rosgraph_msgs.msg import Clock
-
-from simple_pid import PID
+from os import listdir
+from os.path import isfile, join
+import matplotlib.pyplot as plt
 
 import pickle
 
-import threading
+def get_relative_heading_position(relative, center):
+        relative_orientation = relative[2]
+        center_pos = np.asarray(center[0:2])
+        relative_pos = np.asarray(relative[0:2])
+        center_orientation = center[2]
 
-import logging
+        # transform the relative to center coordinat
+        relative_pos = np.asarray(relative_pos - center_pos)
+        relative_pos2 = np.asarray((relative_pos[0] +math.cos(relative_orientation) , relative_pos[1] + math.sin(relative_orientation)))
+        rotation_matrix = np.asarray([[np.cos(-center_orientation), np.sin(-center_orientation)], [-np.sin(-center_orientation), np.cos(-center_orientation)]])
+        relative_pos = np.matmul(relative_pos, rotation_matrix)
+        relative_pos2 = np.matmul(relative_pos2, rotation_matrix)
+        angle_relative = np.arctan2(relative_pos2[1]-relative_pos[1], relative_pos2[0]-relative_pos[0])
 
-logger = logging.getLogger(__name__)
+        return angle_relative, relative_pos
 
-class Manager:
-    def __init__(self, agent_num):
-        self.lock_spin = _thread.allocate_lock()
-        self.agent_num = agent_num
-        # self.sdf_file_path = os.path.join(
-        #     get_package_share_directory("turtlebot3_gazebo"), "models",
-        #     "turtlebot3_burger", "model.sdf")
-        self.sdf_file_path = os.path.join("/home/payam/ros2_ws/src/follow_ahead_rl/worlds/", "turtlebot3_burger", "model.sdf")
-        self.node = rclpy.create_node("manager_{}".format(agent_num))
-        self.time = self.node.get_clock()
-        self.node.get_logger().debug(
-            'Creating Service client_delete to connect to `/delete_entity`')
-        self.client_delete = self.node.create_client(DeleteEntity, "/delete_entity")
+class LogParser():
+    def __init__(self, folder):
+        log_files = [(f, join(folder, f)) for f in listdir(folder) if isfile(join(folder, f))]
+        for log_file in log_files:
+            with open(log_file[1], "rb") as file:
+                log_unpacked = pickle.load(file)
+                # uncomment to pos_plot for both person and robot
+                # plt.plot([x[0] for x in log_unpacked["robot_history"]],[x[1] for x in log_unpacked["robot_history"]] ,'ro',  linewidth=0.1, markersize=1)
+                # plt.plot([x[0] for x in log_unpacked["person_history"]],[x[1] for x in log_unpacked["person_history"]] ,'bo',  linewidth=0.1, markersize=1)
 
-        self.node.get_logger().debug(
-            'Creating Service client_spawn to connect to `/spawn_entity`')
-        self.client_spawn = self.node.create_client(SpawnEntity, "/spawn_entity")
-        self.set_entity_state = self.node.create_client(SetEntityState, "/set_entity_state")
-        self.client_pause = self.node.create_client(Empty, "/pause_physics")
-        self.client_unpause = self.node.create_client(Empty, "/unpause_physics")
-        self.current_time = None
-
-
-    def cleanup(self):
-        self.node.destroy_client(self.client_delete )
-        self.node.destroy_client(self.client_spawn)
-        self.node.destroy_client(self.client_pause)
-        self.node.destroy_client(self.client_unpause)
-        self.node.destroy_node()
-
-    def get_time_sec(self):
-        #return self.time.now().nanoseconds/1000000000.0
-        while self.current_time is None:
-            time.sleep(0.1)
-            self.node.get_logger().warn("waiting for time")
-        return self.current_time
-    def remove_object(self, name):
-        # self.pause()
-        if not self.client_delete.service_is_ready():
-            self.client_delete.wait_for_service(timeout_sec=8)
-            self.node.get_logger().debug("...connected!")
-        # Set data for request
-        request = DeleteEntity.Request()
-        request.name = name
-        future = self.client_delete.call_async(request)
-        # self.unpause()
-        with self.lock_spin:
-            self.node.get_logger().info("Sending service request to `/delete_entity`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=5)
-        if future.result() is None:
-            raise RuntimeError(
-                'exception while calling service: %r' % future.exception())
-
-    def move_robot(self, name, name_space, pos_rotation):
-        translation, rotation= pos_rotation["pos"], pos_rotation["orientation"]
-        # self.remove_object(name)
-        # self.node.get_logger().info("Connecting to `/set_entity_state` service...")
-        if not self.set_entity_state.service_is_ready():
-            self.set_entity_state.wait_for_service(timeout_sec=8)
-            self.node.get_logger().debug("set entity state connected!")
-
-        quaternion_rotation = euler2quat(0, rotation, 0)
-
-        # Set data for request
-        request = SetEntityState.Request()
-        request.state.name = name
-        # Set position
-        request.state.pose.position.x = float(translation[0])
-        request.state.pose.position.y = float(translation[1])
-        request.state.pose.position.z = self.agent_num * 2.5 + 0.19
-        # Set orientation
-        request.state.pose.orientation.x = quaternion_rotation[3]
-        request.state.pose.orientation.y = quaternion_rotation[1]
-        request.state.pose.orientation.z = quaternion_rotation[2]
-        request.state.pose.orientation.w = quaternion_rotation[0]
-
-        future = self.set_entity_state.call_async(request)
-        # self.node.get_logger().info("before lock `/set_entity_state`")
-
-        with self.lock_spin:
-            # self.node.get_logger().info("Sending service request to `/set_entity_state`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=13)
-        if future.result() is None:
-            raise RuntimeError(
-                'exception while calling set_entity state: {} name: {}'.format( future.exception(), name))
-
-    def create_robot(self, name, name_space, pos_rotation):
-        translation, rotation= pos_rotation["pos"], pos_rotation["orientation"]
-        # self.remove_object(name)
-        # self.node.get_logger().info("Connecting to `/spawn_entity` service...")
-        if not self.client_spawn.service_is_ready():
-            self.client_spawn.wait_for_service(timeout_sec=8)
-            self.node.get_logger().debug("...connected!")
-
-        # Set data for request
-        request = SpawnEntity.Request()
-        request.name = name
-        request.xml = open(self.sdf_file_path, 'r').read()
-        request.robot_namespace = name_space
-        request.initial_pose.position.x = float(translation[0])
-        request.initial_pose.position.y = float(translation[1])
-        request.initial_pose.position.z = self.agent_num * 2.5 + 0.19
-        # TODO: check euler angle
-        quaternion_rotation = euler2quat(0, rotation, 0)
-        request.initial_pose.orientation.x = quaternion_rotation[3]
-        request.initial_pose.orientation.y = quaternion_rotation[1]
-        request.initial_pose.orientation.z = quaternion_rotation[2]
-        request.initial_pose.orientation.w = quaternion_rotation[0]
-
-        future = self.client_spawn.call_async(request)
-        with self.lock_spin:
-            # self.node.get_logger().info("Sending service request to `/spawn_entity`")
-            rclpy.spin_until_future_complete(self.node, future, timeout_sec=13)
-        if future.result() is None:
-           raise RuntimeError(
-                'exception while calling service: %r' % future.exception())
-
-    def reset(self):
-        pass
-
-class History():
-    def __init__(self, memory_size, window_size, rate, manager):
-        self.data = [None for x in range(memory_size)]
-        self.idx = 0
-        self.manager = manager
-        self.update_rate = rate
-        self.memory_size = memory_size
-        self.window_size = window_size
-        self.avg_frame_rate = None
-        self.time_data_= []
-
-    def add_element(self, element, time_data):
-        """
-        element: the data that we put inside the history data array
-        time_data: in second the arrive time of data (get it from ros msg time)
-        """
-        self.idx = (self.idx + 1) % self.window_size
-
-        if self.data[self.idx] is None:
-            for idx in range(self.memory_size):
-                self.data[idx] = element
-        self.data[self.idx] = element
-        if not len(self.time_data_) > 50:
-            self.time_data_.append(time_data)
-            if len(self.time_data_) > 3:
-                prev_t = self.time_data_[0]
-                time_intervals = []
-                for t in self.time_data_[1:]:
-                    time_intervals.append(t - prev_t)
-                    prev_t = t
-                self.avg_frame_rate = 1.0 / np.average(time_intervals)
+                angle_relative, relative_pos get_relative_heading_position(
+                plt.show()
 
 
-    def get_elemets(self):
-        return_data = []
-        skip_frames = int(math.ceil(self.avg_frame_rate / self.update_rate))
-        # print("in get element", skip_frames, self.avg_frame_rate, self.update_rate)
-        index = (self.idx - 1)% self.window_size
-        if self.window_size * skip_frames >= self.memory_size:
-            print("error in get element memory not enough")
-        for i in range (self.window_size):
-            return_data.append(self.data[index])
-            index = (index + skip_frames) % self.window_size
-
-        return return_data
 
 class Robot():
     def __init__(self, name, init_pos, manager, node, max_angular_speed=1, max_linear_speed=1, relative=None):
@@ -1028,17 +868,5 @@ class GazeboEnv(gym.Env):
     def render(self, mode='human', close=False):
         """ Viewer only supports human mode currently. """
         return
-
+LogParser("/home/payam/ros2_ws/src/follow_ahead_rl/scripts/data_test")
 # gazebo = GazeboEnv()
-
-def test_env():
-    rclpy.init()
-    node = rclpy.create_node("gazebo_env")
-    manager = Manager()
-    robot = Robot('my_robot', init_pos=(4,4,4),  angle=0, manager=manager)
-    while rclpy.ok():
-
-        rclpy.spin_once(node)
-    exit()
-
-# test_env()
