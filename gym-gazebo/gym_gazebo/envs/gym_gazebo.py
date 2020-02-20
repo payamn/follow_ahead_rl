@@ -11,7 +11,14 @@ import _thread
 import numpy as np
 import cv2 as cv
 
-import rclpy
+try:
+    import rospy
+    ROS_VERSION=1
+    print ("using ros1")
+except Exception as e:
+    import rclpy
+    print ("using ros2")
+    ROS_VERSION=2
 
 from squaternion import quat2euler
 from squaternion import euler2quat
@@ -422,28 +429,23 @@ class Robot():
             if distance is None:
                 return
 
-            angular_vel = -min(max(self.angular_pid(diff_angle)*10, -self.max_angular_vel),self.max_angular_vel)
-            linear_vel = min(max(self.linear_pid(-distance), -self.max_linear_vel), self.max_linear_vel)
-            linear_vel = min(linear_vel * math.pow((abs(math.pi - abs(diff_angle))/math.pi), 2), linear_vel)
-            print("angle: {} multiplier {} distance: {}".format(math.pi - diff_angle, abs(math.pi - abs(diff_angle))/math.pi, distance))
-
             if self.reset:
                 return
             cmd_vel = Twist()
             if person_mode == 1:
-                linear_vel = 0.4
-                angular_vel = 0.4
+                linear_vel = 0.1
+                angular_vel = 0.1
             elif person_mode == 2:
-                linear_vel = 0.4
-                angular_vel = -0.4
+                linear_vel = 0.2
+                angular_vel = -0.2
             elif person_mode == 3:
                 linear_vel = 0.2
-                angular_vel = -0.4
+                angular_vel = -0.1
             elif person_mode == 4:
                 linear_vel = 0.2
-                angular_vel = 0.4
+                angular_vel = 0.1
             elif person_mode == 5:
-                linear_vel = 0.5
+                linear_vel = 0.2
                 angular_vel = 0.0
             elif person_mode == 6:
                 linear_vel, angular_vel = self.get_velocity()[0]
@@ -452,8 +454,18 @@ class Robot():
             elif person_mode == 7:
                 linear_vel = 0.5
                 angular_vel = -0.5
+            elif peron_mode == 0:
+                angular_vel = -min(max(self.angular_pid(diff_angle)*10, -self.max_angular_vel),self.max_angular_vel)
+                linear_vel = linear_vel * math.pow((abs(math.pi - abs(diff_angle))/math.pi), 2)
+                linear_vel = min(max(self.linear_pid(-distance), 0), self.max_linear_vel)
+
+            if person_mode != 0:
+                angular_vel += random.uniform(-0.1, 0.1)
+                linear_vel += random.uniform(-0.1, 0.1)
 
 
+            angular_vel = min(max(angular_vel, -self.max_angular_vel),self.max_angular_vel)
+            linear_vel = min(max(linear_vel, 0), self.max_linear_vel)
             cmd_vel.linear.x = float(linear_vel)
             cmd_vel.angular.z = float(angular_vel)
             self.cmd_vel_pub.publish(cmd_vel)
@@ -483,7 +495,7 @@ class Robot():
 
 class GazeboEnv(gym.Env):
 
-    def __init__(self, is_evaluation=True):
+    def __init__(self, is_evaluation=False):
 
         self.use_goal = False
         self.is_evaluation_ = is_evaluation
