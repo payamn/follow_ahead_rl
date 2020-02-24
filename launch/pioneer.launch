@@ -1,5 +1,6 @@
 <launch>
   <include file="$(find vicon_bridge)/launch/vicon.launch" />
+  <include file="$(find turtlebot_bringup)/launch/minimal.launch" />
     <arg name="config_topics" default="$(find follow_ahead_rl)/config/twist_mux_topics.yaml"/>  
   <node pkg="joy" type="joy_node" name="joy_node" output="screen">
     <remap from="/joy" to="/teleop/joy" />
@@ -8,7 +9,7 @@
   </node>
 
   <node pkg="twist_mux" type="twist_mux" name="twist_mux" output="screen">
-        <remap from="cmd_vel_out" to="cmd_vel"/>
+        <remap from="cmd_vel_out" to="/cmd_vel_mux/input/teleop"/>
 
         <rosparam file="$(arg config_topics)" command="load"/>
     </node>
@@ -19,6 +20,8 @@
     <remap from="joy" to="teleop/joy" />
     <remap from="cmd_vel" to="teleop_cmd_vel" />
     <param name="enable_button" value="1" />
+    <param name="scale_angular" value="2" />
+    <param name="scale_linear" value="1" />
   </node>
 
 </launch>
