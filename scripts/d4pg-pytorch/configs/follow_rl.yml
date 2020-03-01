@@ -1,6 +1,6 @@
 # Environment parameters
 
-env: gazebo-v0
+env: vicon-v0
 state_dim: 7
 action_dim: 2
 action_low: -1

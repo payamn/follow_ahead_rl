@@ -1,5 +1,5 @@
 from gym.utils import seeding
-
+import copy
 import os, subprocess, time, signal
 
 import gym
@@ -20,6 +20,7 @@ from squaternion import euler2quat
 
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import Point
+from geometry_msgs.msg import TransformStamped
 from sensor_msgs.msg import LaserScan
 from rosgraph_msgs.msg import Clock
 
@@ -67,10 +68,10 @@ class History():
 
     def get_elemets(self):
         return_data = []
-        skip_frames = int(math.ceil(self.avg_frame_rate / self.update_rate))
+        skip_frames = -int(math.ceil(self.avg_frame_rate / self.update_rate))
         # print("in get element", skip_frames, self.avg_frame_rate, self.update_rate)
         index = (self.idx - 1)% self.window_size
-        if self.window_size * skip_frames >= self.memory_size:
+        if self.window_size * abs(skip_frames) >= self.memory_size:
             print("error in get element memory not enough")
         for i in range (self.window_size):
             return_data.append(self.data[index])
@@ -79,10 +80,11 @@ class History():
         return return_data
 
 class Robot():
-    def __init__(self, name, init_pos, max_angular_speed=1, max_linear_speed=1, relative=None):
+    def __init__(self, name, max_angular_speed=1, max_linear_speed=1, relative=None):
         self.name = name
         self.init_node = False
         self.alive = True
+        self.prev_call_vicon_ = None
         self.relative = relative
         self.log_history = []
         self.init_node = True
@@ -94,11 +96,17 @@ class Robot():
         self.width_laserelement_image = 100
         self.height_laser_image = 50
         self.state_ = {'position':      (None, None),
-                       'orientation':   init_pos["orientation"]}
+                       'orientation':   None}
 
-        self.cmd_vel_pub =  rospy.Publisher('/cmd_vel', Twist, queue_size=1)
-        # TODO: fill it
-        rospy.Subscriber("chatter", String, callback)
+        self.cmd_vel_pub =  rospy.Publisher('/cmd_vel_agent', Twist, queue_size=1)
+        if self.name == "robot":
+            rospy.Subscriber("/vicon/turttle/turttle", TransformStamped, self.vicon_cb)
+        elif self.name == "person":
+            rospy.Subscriber("/vicon/Personm/Personm", TransformStamped, self.vicon_cb)
+        else:
+            rospy.logerr("wrong name {}".format(self.name))
+            exit(10)
+
 
         self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
@@ -124,52 +132,53 @@ class Robot():
         self.alive = True
         self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
-        self.relative_pos_history = History(200, 10, 2)
-        self.relative_orientation_history = History(200, 10, 2)
-        self.velocity_history = History(200, 10, 2)
-        self.velocity_history.add_element((0,0), rospy.Time.now().to_sec())
-        self.scan_image = None
-        self.scan_image_history = History(5, 5, 1)
+        #self.relative_pos_history = History(200, 10, 2)
+        #self.relative_orientation_history = History(200, 10, 2)
+        #self.velocity_history = History(200, 10, 2)
+        #self.velocity_history.add_element((0,0), rospy.Time.now().to_sec())
         self.log_history = []
-        self.is_collided = False
+        #self.prev_call_vicon_ = None
+        #self.is_collided = False
         self.is_pause = False
         self.reset = False
-
     def add_log(self, log):
         self.log_history.append(log)
 
     def remove(self):
         self.reset = True
 
-    # TODO complete this for sub pos
-    def states_cb(self, states_msg):
-        model_idx = None
-        prev_pos = self.state_["position"]
-        for i in range(len(states_msg.name)):
-            if states_msg.name[i] == self.name:
-                model_idx = i
-                break
-        if model_idx is None:
-            print("cannot find {}".format(self.name))
+    def vicon_cb(self, pose_msg):
+        if self.prev_call_vicon_ is not None and rospy.Time.now().to_sec() - self.prev_call_vicon_ < 0.05:
             return
-
-        pos = states_msg.pose[model_idx]
-        self.state_["position"] = (pos.position.x, pos.position.y)
-        euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
+        pos = pose_msg.transform.translation
+        prev_state = copy.copy(self.state_)
+        self.state_["position"] = (pos.y, -pos.x)
+        euler = quat2euler(pose_msg.transform.rotation.x, pose_msg.transform.rotation.y, pose_msg.transform.rotation.z, pose_msg.transform.rotation.w)
         self.state_["orientation"] = euler[0]
+        if self.prev_call_vicon_ is None:
+            self.prev_call_vicon_ = rospy.Time.now().to_sec()
+            return
 
         if self.relative is not None and not self.relative.reset:
             orientation_rel, position_rel = ViconEnv.get_relative_heading_position(self, self.relative)
             if orientation_rel is None or position_rel is None:
+                ropy.logwarn("por or orientation is None")
             else:
                 self.relative_orientation_history.add_element(orientation_rel, rospy.Time.now().to_sec())
                 self.relative_pos_history.add_element(position_rel, rospy.Time.now().to_sec())
 
         # get velocity
-        twist = states_msg.twist[model_idx]
-        linear_vel = twist.linear.x
-        angular_Vel = twist.angular.z
-        self.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), rospy.Time.now().to_sec())
+        twist = Twist()
+        delta_time = rospy.Time.now().to_sec() - self.prev_call_vicon_
+        twist.linear.x = math.hypot(prev_state["position"][0] - self.state_["position"][0], prev_state["position"][1] - self.state_["position"][1]) / delta_time 
+        twist.angular.z = ViconEnv.wrap_pi_to_pi(prev_state["orientation"]-self.state_["orientation"])/delta_time
+        self.prev_call_vicon_ = rospy.Time.now().to_sec()
+        self.velocity_history.add_element(np.asarray((twist.linear.x, twist.angular.z)), rospy.Time.now().to_sec())
+        if self.relative is not None:
+            # rospy.loginfo("{}: delta {} rel_pos: {} orientation {} vel ang: {} linea: {}".format(self.name, delta_time, position_rel, np.rad2deg(orientation_rel), np.rad2deg(twist.angular.z), twist.linear.x))
+            rospy.loginfo("{}: rel_pos: {:2.2f},{:2.2f} orientation {:2.2f}".format(self.name, position_rel[0], position_rel[1], np.rad2deg(orientation_rel)))
+        # else:
+        #     rospy.loginfo("{}: delta {} pos: {} orientation {} vel ang: {} linea: {}".format(self.name, delta_time, self.state_["position"], np.rad2deg(self.state_["orientation"]), np.rad2deg(twist.angular.z), twist.linear.x))
 
     def get_velocity(self):
         return self.velocity_history.get_elemets()
@@ -191,7 +200,7 @@ class Robot():
 
         cmd_vel = Twist()
         cmd_vel.linear.x = float(linear_vel)
-        cmd_vel.angular.z = float(angular_vel)
+        cmd_vel.angular.z = float(-angular_vel)
         self.cmd_vel_pub.publish(cmd_vel)
 
     def stop_robot(self):
@@ -287,9 +296,9 @@ class Robot():
 
 class ViconEnv(gym.Env):
 
-    def __init__(self, is_evaluation=True):
+    def __init__(self, is_evaluation=False):
 
-        self.use_goal = False
+        self.node = rospy.init_node('gym_vicon')
         self.is_evaluation_ = is_evaluation
 
         self.is_reseting = True
@@ -308,22 +317,22 @@ class ViconEnv(gym.Env):
         self.reward_range = [-1, 1]
 
     def set_agent(self, agent_num):
-        self.node = rospy.init_node('gym_vicon')
 
+        self.log_file = None
         self.agent_num = agent_num
         self.create_robots()
 
         self.init_simulator()
+    
 
 
     def create_robots(self):
-        init_pos_robot, init_pos_person = self.get_init_pos_robot_person()
 
-        self.person = Robot('person_{}'.format(self.agent_num), init_pos= init_pos_person,
+        self.person = Robot('person',
                             max_angular_speed=0.25, max_linear_speed=.25)
 
-        self.robot = Robot('my_robot_{}'.format(self.agent_num), init_pos= init_pos_robot,
-                            max_angular_speed=0.5, max_linear_speed=0.5, relative=self.person)
+        self.robot = Robot('robot',
+                            max_angular_speed=2.0, max_linear_speed=0.6, relative=self.person)
 
     def find_random_point_in_circle(self, radious, min_distance, around_point):
         max_r = 2
@@ -352,43 +361,6 @@ class ViconEnv(gym.Env):
         # self.resume_simulator()
         rospy.loginfo("init simulation finished")
 
-    # TODO: write this again
-    def states_cb(self, states_msg):
-
-        if self.state_cb_prev_time is None or rospy.Time.now().to_sec() - self.state_cb_prev_time < 0.1:
-            if self.state_cb_prev_time is None:
-                self.state_cb_prev_time = rospy.Time.now().to_sec()
-            return
-
-        self.state_cb_prev_time = rospy.Time.now().to_sec()
-        for model_idx in range(len(states_msg.name)):
-            if states_msg.name[model_idx] == self.person.name:
-                robot = self.person
-            elif states_msg.name[model_idx] == self.robot.name:
-                robot = self.robot
-            else:
-                continue
-
-            pos = states_msg.pose[model_idx]
-            robot.state_["position"] = (pos.position.x, pos.position.y)
-            euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
-            robot.state_["orientation"] = euler[0]
-            robot.add_log((pos.position.x, pos.position.y, euler[0]))
-        for robot in (self.robot, self.person):
-            if robot.relative is not None and not robot.relative.reset:
-                orientation_rel, position_rel = ViconEnv.get_relative_heading_position(robot, robot.relative)
-                if orientation_rel is None or position_rel is None:
-                    rospy.logerr('orientation or pos is none')
-                else:
-                    robot.relative_orientation_history.add_element(orientation_rel, rospy.Time.now().to_sec())
-                    robot.relative_pos_history.add_element(position_rel, rospy.Time.now().to_sec())
-
-            # get velocity
-            twist = states_msg.twist[model_idx]
-            linear_vel = twist.linear.x
-            angular_Vel = twist.angular.z
-            robot.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), rospy.Time.now().to_sec())
-
     def pause(self):
         self.is_pause = True
         self.person.pause()
@@ -403,6 +375,14 @@ class ViconEnv(gym.Env):
 
     def calculate_angle_using_path(self, idx):
         return math.atan2(self.path["points"][idx+1][1] - self.path["points"][idx][1], self.path["points"][idx+1][0] - self.path["points"][idx][0])
+
+    @staticmethod
+    def wrap_pi_to_pi(angle):
+        while angle > math.pi:
+            angle -= math.pi
+        while angle < - math.pi:
+            angle += 2*math.pi
+        return angle
 
     @staticmethod
     def get_relative_heading_position(relative, center):
@@ -423,7 +403,8 @@ class ViconEnv(gym.Env):
         relative_pos = np.matmul(relative_pos, rotation_matrix)
         relative_pos2 = np.matmul(relative_pos2, rotation_matrix)
         angle_relative = np.arctan2(relative_pos2[1]-relative_pos[1], relative_pos2[0]-relative_pos[0])
-        return angle_relative, relative_pos
+        relative_pos = (-relative_pos[1], -relative_pos[0])
+        return -angle_relative, relative_pos
 
     def set_robot_to_auto(self):
         self.robot_mode = 1
@@ -511,26 +492,6 @@ class ViconEnv(gym.Env):
 
         return (images.reshape((images.shape[1], images.shape[2], images.shape[0])))
 
-    def visualize_observation(self, poses, headings, laser_scans):
-        image = np.zeros((500, 500, 3))
-        for idx in range(len(poses)):
-            pt1 = (poses[idx][0] * 50 + 250, poses[idx][1] * 50 + 250)
-            pt2 = (pt1[0] + math.cos(headings[idx]) * 30, pt1[1] + math.sin(headings[idx]) * 30)
-
-            pt1 = (int(pt1[0]), int(pt1[1]))
-            pt2 = (int(pt2[0]), int(pt2[1]))
-
-            pos_goal, angle_distance = self.get_goal_person()
-            pt_goal = np.asarray(angle_distance)
-            pt_goal = (int(math.sin(pt_goal[0])* pt_goal[1] * 50 + 250), int(math.cos(pt_goal[0]) * pt_goal[1] * 50 + 250))
-            cv.circle(image, pt1, 5, (255, 255 - idx*40, idx*40))
-
-            # cv.arrowedLine(image, pt1, pt2, (0, 0, 255), 5, tipLength=0.6)
-            cv.circle(image, pt_goal, 20, (255, 255, 0))
-            # cv.imshow("d", pickle_file[0][0])
-            cv.imshow("d", image)
-        cv.waitKey(1)
-
     def get_observation(self):
         # got_laser = False
         # while not got_laser:
@@ -547,6 +508,7 @@ class ViconEnv(gym.Env):
             rospy.logerr("waiting to get pos/vel pos: {} vel: {} vel_person: {}".format(self.robot.relative_pos_history.avg_frame_rate ,self.robot.velocity_history.avg_frame_rate, self.person.velocity_history.avg_frame_rate))
         pose_history = np.asarray(self.robot.relative_pos_history.get_elemets()).flatten()/5.0
         heading_history = np.asarray(self.robot.relative_orientation_history.get_elemets())/math.pi
+        print("pos: {:2.2f} {:2.2f} orientation:{:2.2f} vel l,a: {:2.2f} {:2.2f}".format(self.robot.relative_pos_history.get_elemets()[0][0], self.robot.relative_pos_history.get_elemets()[0][1], np.rad2deg(self.robot.relative_orientation_history.get_elemets()[0]), self.robot.get_velocity()[0][0], np.rad2deg(self.robot.get_velocity()[0][1])))
         # self.visualize_observation(poses, headings, self.get_laser_scan())
         orientation_position = np.append(pose_history, heading_history)
         velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))
@@ -563,7 +525,7 @@ class ViconEnv(gym.Env):
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
-        time.sleep(0.05)
+        time.sleep(0.15)
         reward = self.get_reward()
         ob = self.get_observation()
         episode_over = False
@@ -584,7 +546,7 @@ class ViconEnv(gym.Env):
             episode_over = True
             rospy.loginfo('max number of steps episode over')
         reward = min(max(reward, -1), 1)
-        rospy.loginfo("agent: {} action {} reward {}".format((self.agent_num),action, reward))
+        rospy.loginfo("action {} reward {}".format(action, reward))
         #reward += 1
         return ob, reward, episode_over, {}
 
@@ -595,79 +557,38 @@ class ViconEnv(gym.Env):
             return True
         return False
 
-    def get_goal_person(self):
-        pos_person = self.person.get_pos()
-        pos_goal = None
-        angle_distance = None
-        for idx in range(self.current_path_idx + 1, len(self.path["points"]) - 3):
-            if math.hypot(pos_person[0]-self.path["points"][idx][0], pos_person[1]-self.path["points"][idx][1]) > 3:
-                pos_goal = (self.path[idx][0], self.path[idx][1])
-                angle_distance= self.robot.angle_distance_to_point(pos_goal)
-                break
-        return pos_goal, angle_distance
-
     def get_reward(self):
         reward = 0
-        if self.use_goal:
-            point_goal = (self.path["points"][self.current_path_idx + 1][0], self.path["points"][self.current_path_idx + 1][1])
-            try:
-                pos_robot = self.robot.get_pos()
-            except Exception as e:
-                rospy.logerr("get pos error in get_reward return 0")
-                return 0
-            distance_goal = math.hypot(pos_robot[1] - point_goal[1], pos_robot[0] - point_goal[0])
-            # reward = max (-distance_goal/3.0, -0.9) + 0.4 # between -0.5,0.4
-            robot_pos_heading = np.asarray(
-                    [pos_robot[0] + math.cos(self.robot.orientation), pos_robot[1] + math.sin(self.robot.orientation)])
-            p23 = math.hypot(robot_pos_heading[1]-point_goal[1], robot_pos_heading[0]-point_goal[0])
-            p12 = math.hypot(pos_robot[1]-robot_pos_heading[1], pos_robot[0]-robot_pos_heading[0])
-            p13 = math.hypot(point_goal[1]-pos_robot[1], point_goal[0]-pos_robot[0])
-            if p12 == 0:
-                p12 = 0.000001
-            if p13 == 0:
-                p13 = 0.000001
-            angle_robot_goal = np.rad2deg(math.acos(max(min((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13), 1), -1)))
-            reward += ((60 - angle_robot_goal)/120.0)/2 +0.25 # between -0.25,0.5
-            angle_robot_person, pos_rel = ViconEnv.get_relative_heading_position(self.robot, self.person)
-            distance = math.hypot(pos_rel[0], pos_rel[1])
-
-            if distance < 1.5:
-                reward -= (1.5-distance)/2.0
-            elif distance > 2.5:
-                reward -= (distance-2.5)/2.0
-            else: # distance between 1.5 to 2.5
-                reward += 0.5 - abs(distance-2)/2.0 # between 0.25-0.5
+        angle_robot_person, pos_rel = ViconEnv.get_relative_heading_position(self.robot, self.person)
+        angle_robot_person = math.atan2(pos_rel[1], pos_rel[0])
+        angle_robot_person = np.rad2deg(angle_robot_person)
+        distance = math.hypot(pos_rel[0], pos_rel[1])
+        # Negative reward for being behind the person
+        if self.is_collided():
+            reward -= 1
+        if distance < 0.3:
+            reward = -1.3
+        elif abs(distance - 1.7) < 0.7:
+            reward += 0.1 * (0.7 - abs(distance - 1.7))
+        elif distance >= 1.7:
+            reward -= 0.25 * (distance - 1.7)
+        elif distance < 1:
+            reward -= (1 - distance)/2.0
+        if abs(angle_robot_person) < 45:
+            reward += 0.2 * (45 - abs(angle_robot_person)) / 45
         else:
-            angle_robot_person, pos_rel = ViconEnv.get_relative_heading_position(self.robot, self.person)
-            angle_robot_person = math.atan2(pos_rel[1], pos_rel[0])
-            angle_robot_person = np.rad2deg(angle_robot_person)
-            distance = math.hypot(pos_rel[0], pos_rel[1])
-            # Negative reward for being behind the person
-            if self.is_collided():
-                reward -= 1
-            if distance < 0.3:
-                reward = -1.3
-            elif abs(distance - 1.7) < 0.7:
-                reward += 0.1 * (0.7 - abs(distance - 1.7))
-            elif distance >= 1.7:
-                reward -= 0.25 * (distance - 1.7)
-            elif distance < 1:
-                reward -= (1 - distance)/2.0
-            if abs(angle_robot_person) < 45:
-                reward += 0.2 * (45 - abs(angle_robot_person)) / 45
-            else:
-                reward -= 0.1 * abs(angle_robot_person) / 180
+            reward -= 0.1 * abs(angle_robot_person) / 180
 
-            # if not 90 > angle_robot_person > 0:
-            #     reward -= distance/6.0
-            # elif self.min_distance < distance < self.max_distance:
-            #     reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
-            # elif distance < self.min_distance:
-            #     reward -= 1 - distance / self.min_distance
-            # else:
-            #     reward -= distance / 7.0
-            reward = min(max(reward, -1), 1)
-            # ToDO check for obstacle
+        # if not 90 > angle_robot_person > 0:
+        #     reward -= distance/6.0
+        # elif self.min_distance < distance < self.max_distance:
+        #     reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
+        # elif distance < self.min_distance:
+        #     reward -= 1 - distance / self.min_distance
+        # else:
+        #     reward -= distance / 7.0
+        reward = min(max(reward, -1), 1)
+        # ToDO check for obstacle
         return reward
 
 
@@ -685,11 +606,7 @@ class ViconEnv(gym.Env):
             rospy.loginfo("got the lock")
             not_init = True
             try:
-                if self.position_thread.isAlive():
-
-                    rospy.loginfo("wait for position thread to join")
-                    self.position_thread.join()
-                    rospy.loginfo("position thread joined")
+                
                 if self.is_evaluation_:
                     if self.log_file is not None:
                         pickle.dump({"person_history":self.person.log_history, "robot_history":self.robot.log_history}, self.log_file)
@@ -719,3 +636,10 @@ class ViconEnv(gym.Env):
         return
 
 
+# def test():
+#     vicon_n = ViconEnv()
+#     vicon_n.set_agent(0)
+#     rospy.spin()
+#     print("done")
+# 
+# test()
