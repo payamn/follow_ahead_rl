@@ -8,9 +8,9 @@ action_high: 1
 num_agents: 4
 random_seed: 2019
 policy_weights: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/
-policy_weights_best: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/policy_best.pt
+policy_weights_best: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/policy_best2.pt
 value_weights: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/
-value_weights_best: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/value_best.pt
+value_weights_best: /home/payam/ros2_ws/src/follow_ahead_rl/scripts/results/value_best2.pt
 
 # Training parameters
 
