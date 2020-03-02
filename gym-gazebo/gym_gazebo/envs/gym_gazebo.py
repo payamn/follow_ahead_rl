@@ -1,5 +1,6 @@
 from gym.utils import seeding
 
+
 import os, subprocess, time, signal
 
 import gym
@@ -682,7 +683,7 @@ class GazeboEnv(gym.Env):
                 if orientation_rel is None or position_rel is None:
                     robot.manager.node.get_logger().error('orientation or pos is none')
                 else:
-                    print("pos_rel: {:2.2f} {:2.2f}, orientation: {:2.2f}".format(position_rel[0], position_rel[1], np.rad2deg(orientation_rel)))
+                    self.node.get_logger().info("agent: {} pos_rel: {:2.2f} {:2.2f}, orientation: {:2.2f}".format(self.agent_num, position_rel[0], position_rel[1], np.rad2deg(orientation_rel)))
                     robot.relative_orientation_history.add_element(orientation_rel, robot.manager.get_time_sec())
                     robot.relative_pos_history.add_element(position_rel, robot.manager.get_time_sec())
 
