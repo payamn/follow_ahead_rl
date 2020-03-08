@@ -11,6 +11,7 @@ import math
 import numpy as np
 
 from sensor_msgs.msg import Image
+from sensor_msgs.msg import CameraInfo
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 import rospy
 from cv_bridge import CvBridge, CvBridgeError
@@ -59,14 +60,12 @@ for i in range(0, len(args[1])):
         key = curr_item.replace('-','')
         if key not in params: params[key] = next_item
 
-# Construct it from system arguments
-# op.init_argv(args[1])
-# oppython = op.OpenposePython()
 
 
 class PersonDetection:
     def __init__(self, params_op):
         self.bridge = CvBridge()
+        self.camera_intrinsic_ = None
 
         self.rgb_subb = Subscriber("/zed/zed_node/rgb/image_rect_color", Image)
         #self.rgb_sub = rospy.Subscriber("/zed/zed_node/rgb/image_rect_color", Image, self.camera_cb)
@@ -74,10 +73,28 @@ class PersonDetection:
         ats = ApproximateTimeSynchronizer([self.rgb_subb, self.depth_sub], queue_size=2, slop=2)
         ats.registerCallback(self.camera_cb)
 
+        self.camera_info_sub = rospy.Subscriber("/zed/zed_node/depth/camera_info", CameraInfo, self.camera_info_cb)
+
+        self.image_debug_pub_ = rospy.Publisher("person_detection", Image)
+
         # starting openpose
         self.opWrapper = op.WrapperPython()
         self.opWrapper.configure(params_op)
         self.opWrapper.start()
+
+    def camera_info_cb(self, info_msg):
+        if self.camera_intrinsic_ is None:
+            camera_intrinsic = info_msg.K
+            self.camera_intrinsic_ = {
+                    "fx": camera_intrinsic[0],
+                    "cx": camera_intrinsic[2],
+                    "fy": camera_intrinsic[4],
+                    "cy": camera_intrinsic[5]
+                    }
+
+            self.camera_info_sub.unregister()
+
+        rospy.loginfo("got camera intrisic {}".format(self.camera_intrinsic_))
 
 
     def camera_cb(self, rgb_msg, depth_msg):
@@ -90,47 +107,81 @@ class PersonDetection:
         #cv2.imshow("img", image)
         #cv2.waitKey(1)
 
+    def calculate_depth(self, image, depth, point):
+        circle_img = np.zeros((depth.shape[0],depth.shape[1]), np.uint8)
+        cv2.circle(image, point, 10, [0,255,0 ], 7)
+        cv2.circle(circle_img,(point[0], point[1]),10,255,-1)
+        masked = np.copy(depth)
+        masked =  cv2.bitwise_and(depth, masked, mask=circle_img)
+        masked = masked[masked!=float('inf')]
+        masked = masked[masked!=float('nan')]
+        masked = masked[masked>0]
+
+        z = np.median(masked)
+        rospy.loginfo("mean {} len: {}".format(z, masked.shape[0]))
+
+        if masked.shape[0]==0:
+            return None
+
+        x = (point[0] - self.camera_intrinsic_["cx"]) * z  / self.camera_intrinsic_["fx"]
+        y = (point[1] - self.camera_intrinsic_["cy"]) * z / self.camera_intrinsic_["fy"]
+        return ((x, y, z))
+
+
     def detect(self, image, depth):
-        #try:
+        if self.camera_intrinsic_ is None:
+            return
         start = time.time()
         # Process and display images
         datum = op.Datum()
         datum.cvInputData = image
         self.opWrapper.emplaceAndPop([datum])
         if datum.poseKeypoints.shape == ():
+            rospy.logwarn("open pose not detecting the person")
             return
         person = datum.poseKeypoints[0]
+        lines=[]
         poses = []
-        for i in [1,2,5]:
+        for i in [2,1,5]:
             if person[i][0] > 0.0001 and person[i][1] > 0.0001:
-                circle_img = np.zeros((depth.shape[0],depth.shape[1]), np.uint8)
-                cv2.circle(image, (person[i][0], person[i][1]), 3, [0,255,0 ])
-                cv2.circle(circle_img,(person[i][0], person[i][1]),6,255,-1)
-                # masked = np.copy(depth)
-                # masked =  cv2.bitwise_and(depth, masked, mask=circle_img)
-                # masked = masked[masked!=float('inf')]
-                # masked = masked[masked!=float('nan')]
-                # masked = masked[masked>0]
-                # #print (masked, masked.shape)
-                # avg = np.average(masked)
-                #rospy.loginfo("mean {}".format(avg))
+                pos = self.calculate_depth(image, depth, (person[i][0], person[i][1]))
+                if pos is not None:
+                    poses.append(np.asarray(pos))
 
-                #datos = cv2.mean(depth, mask=circle_img)
-
-                poses.append((person[i][0], person[i][1]))
-
-        #print ("\nmeans: ")
-        #for i,pos in enumerate(poses):
-        #    print("{}: {:10.2}".format( i, pos[2]))
+        if len(poses)<=1:
+            rospy.logwarn("not enough point detected for shoulders")
+            return
         if len(poses)>1:
-            angle = math.atan2(poses[-1][1] - poses[0][1], poses[-1][0] - poses[0][0])
-            cv2.putText(image, '{:10.1f}'.format(np.rad2deg(angle)),(int((poses[-1][0] + poses[0][0])/2), int((poses[-1][1] + poses[0][1])/2)), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0) , thickness=2, lineType=cv2.LINE_AA)
+            lines.append(poses[-1]-poses[0])
 
+        for i in [8,9,10]:
+            if person[i][0] > 0.0001 and person[i][1] > 0.0001:
+                pos = self.calculate_depth(image, depth, (person[i][0], person[i][1]))
+                if pos is not None:
+                    lines.append(np.asarray(pos)-poses[0])
+                    break
+
+        if len(lines) != 2:
+            rospy.loginfo("not enough lines detected, lines: {}".format(len(lines)))
+            return
+
+        norm_plain = np.cross(lines[0], lines[1])
+        rospy.loginfo("cross is: {}".format(norm_plain))
+
+        if len(poses)>1:
+            angle1 = math.atan2(norm_plain[2], norm_plain[0])
+            angle2 = math.atan2(norm_plain[1], norm_plain[0])
+            angle3 = math.atan2(norm_plain[2], norm_plain[1])
+            cv2.putText(image, '{:2.1f}'.format(np.rad2deg(angle1)-90),(100, int(100)), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 0) , thickness=4, lineType=cv2.LINE_AA)
+            cv2.putText(image, '{:2.2f}, {:2.2f}, {:2.2f}'.format(poses[0][0], poses[0][1], poses[0][2]),(100, int(200)), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 0) , thickness=4, lineType=cv2.LINE_AA)
+            cv2.putText(image, '{:2.2f}, {:2.2f}, {:2.2f}'.format(poses[-1][0], poses[-1][1], poses[-1][2]),(100, int(300)), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 0) , thickness=4, lineType=cv2.LINE_AA)
+            cv2.putText(image, '{:2.2f}, {:2.2f}, {:2.2f}'.format(pos[0], pos[1], pos[2]),(100, int(400)), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 0, 0) , thickness=4, lineType=cv2.LINE_AA)
 
         if not args[0].no_display:
-            cv2.imshow("OpenPose 1.5.1 - Tutorial Python API", datum.cvOutputData)
-            #cv2.imshow("OpenPose 1.5.1 - Tutorial Python API", image)
-            key = cv2.waitKey(1)
+            #cv2.imshow("OpenPose 1.5.1 - Tutorial Python API", datum.cvOutputData)
+            # cv2.imshow("OpenPose 1.5.1 - Tutorial Python API", image)
+            # key = cv2.waitKey(1)
+            self.image_debug_pub_.publish(self.bridge.cv2_to_imgmsg(image, "bgr8"))
 
         end = time.time()
         print("OpenPose demo successfully finished. Total time: " + str(end - start) + " seconds")
