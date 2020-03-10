@@ -1,4 +1,6 @@
 from gym.utils import seeding
+from datetime import datetime
+
 import copy
 import os, subprocess, time, signal
 
@@ -89,6 +91,7 @@ class Robot():
         self.log_history = []
         self.init_node = True
         self.deleted = False
+        self.current_vel_ = Twist()
         self.collision_distance = 0.5
         self.max_angular_vel = max_angular_speed
         self.max_linear_vel = max_linear_speed
@@ -148,13 +151,14 @@ class Robot():
         self.reset = True
 
     def vicon_cb(self, pose_msg):
-        if self.prev_call_vicon_ is not None and rospy.Time.now().to_sec() - self.prev_call_vicon_ < 0.05:
-            return
+        # if self.prev_call_vicon_ is not None and rospy.Time.now().to_sec() - self.prev_call_vicon_ < 0.05:
+        #     return
         pos = pose_msg.transform.translation
         prev_state = copy.copy(self.state_)
         self.state_["position"] = (pos.y, -pos.x)
         euler = quat2euler(pose_msg.transform.rotation.x, pose_msg.transform.rotation.y, pose_msg.transform.rotation.z, pose_msg.transform.rotation.w)
         self.state_["orientation"] = euler[0]
+        self.add_log((self.state_["position"][0],self.state_["position"][1], euler[0]))
         if self.prev_call_vicon_ is None:
             self.prev_call_vicon_ = rospy.Time.now().to_sec()
             return
@@ -199,8 +203,9 @@ class Robot():
         angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
 
         cmd_vel = Twist()
-        cmd_vel.linear.x = float(linear_vel)
-        cmd_vel.angular.z = float(-angular_vel)
+        cmd_vel.linear.x = float(self.current_vel_.linear.x -(self.current_vel_.linear.x - linear_vel)*0.9)
+        cmd_vel.angular.z = -float(self.current_vel_.angular.z - (self.current_vel_.angular.z - angular_vel)*0.9)
+        self.current_vel_ = cmd_vel
         self.cmd_vel_pub.publish(cmd_vel)
 
     def stop_robot(self):
@@ -290,8 +295,6 @@ class Robot():
         return self.state_['position']
 
     def get_laser_image(self):
-        while self.scan_image is None:
-            time.sleep(0.1)
         return np.expand_dims(self.scan_image, axis=2)
 
 class ViconEnv(gym.Env):
@@ -317,8 +320,8 @@ class ViconEnv(gym.Env):
         self.reward_range = [-1, 1]
 
     def set_agent(self, agent_num):
-
-        self.log_file = None
+        date_time = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
+        self.log_file = open('log_{}.pkl'.format(date_time), "wb")
         self.agent_num = agent_num
         self.create_robots()
 
@@ -332,7 +335,7 @@ class ViconEnv(gym.Env):
                             max_angular_speed=0.25, max_linear_speed=.25)
 
         self.robot = Robot('robot',
-                            max_angular_speed=2.0, max_linear_speed=0.6, relative=self.person)
+                            max_angular_speed=3.0, max_linear_speed=0.5, relative=self.person)
 
     def find_random_point_in_circle(self, radious, min_distance, around_point):
         max_r = 2
@@ -525,7 +528,7 @@ class ViconEnv(gym.Env):
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
-        time.sleep(0.15)
+        rospy.sleep(0.05)
         reward = self.get_reward()
         ob = self.get_observation()
         episode_over = False
@@ -591,6 +594,12 @@ class ViconEnv(gym.Env):
         # ToDO check for obstacle
         return reward
 
+    def save_log(self):
+        pickle.dump({"person_history":self.person.log_history, "robot_history":self.robot.log_history}, self.log_file)
+        self.log_file.close()
+
+
+
 
     def reset(self, reset_gazebo=False):
 
@@ -636,10 +645,13 @@ class ViconEnv(gym.Env):
         return
 
 
-# def test():
-#     vicon_n = ViconEnv()
-#     vicon_n.set_agent(0)
-#     rospy.spin()
-#     print("done")
-# 
-# test()
+def read_bag():
+    vicon_n = ViconEnv()
+    vicon_n.set_agent(0)
+
+    while vicon_n.robot.prev_call_vicon_ is None or rospy.Time.now().to_sec() - vicon_n.robot.prev_call_vicon_ < 5:
+        rospy.sleep(0.1)
+    vicon_n.save_log()
+    print("done")
+
+read_bag()
