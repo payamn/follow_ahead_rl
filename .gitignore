@@ -5,3 +5,5 @@
 **/weights/*
 **/dataset/*
 **/results/*
+**/*result*/*
+**/*.swo

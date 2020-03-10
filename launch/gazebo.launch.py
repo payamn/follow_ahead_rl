@@ -42,7 +42,7 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('server')),
             launch_arguments={'world': world, 'extra_gazebo_args':'__params:=/home/payam/ros2_ws/src/follow_ahead_rl/worlds/params/gazebo.yaml'}.items(),
         ),
-	
+
 
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource([os.path.join(get_package_share_directory('gazebo_ros'),'launch'), '/gzclient.launch.py']),
