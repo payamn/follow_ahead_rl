@@ -74,7 +74,9 @@ class Agent(object):
             distance_avg = []
             while not done:
                 action = self.actor.get_action(state)
-                if self.agent_type == "exploration":
+                if self.agent_type == "supervisor":
+                    action = self.env_wrapper.take_supervised_action()
+                elif self.agent_type == "exploration":
                     action = self.ou_noise.get_action(action, num_steps)
                     action = action.squeeze(0)
                 else:

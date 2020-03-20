@@ -141,11 +141,17 @@ class Engine(object):
         processes.append(p)
 
         # Agents (exploration processes)
-        for i in range(1, n_agents):
+        for i in range(1, n_agents-1):
             p = torch_mp.Process(target=agent_worker,
                                  args=(config, policy_net, learner_w_queue, global_episode, i, "exploration", experiment_dir,
                                        training_on, replay_queue, update_step))
             processes.append(p)
+
+        p = torch_mp.Process(target=agent_worker,
+                             args=(config, target_policy_net, None, global_episode, i+1, "supervisor", experiment_dir,
+                                   training_on, replay_queue, update_step))
+        processes.append(p)
+
 
         for p in processes:
             p.start()
