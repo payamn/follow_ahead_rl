@@ -12,6 +12,37 @@ import matplotlib.pyplot as plt
 
 import pickle
 
+def get_reward(angle_robot_person, pos_rel):
+    reward = 0
+    angle_robot_person = math.atan2(pos_rel[1], pos_rel[0])
+    angle_robot_person = np.rad2deg(angle_robot_person)
+    distance = math.hypot(pos_rel[0], pos_rel[1])
+    # Negative reward for being behind the person
+    if distance < 0.3:
+        reward = -1.3
+    elif abs(distance - 1.7) < 0.7:
+        reward += 0.1 * (0.7 - abs(distance - 1.7))
+    elif distance >= 1.7:
+        reward -= 0.25 * (distance - 1.7)
+    elif distance < 1:
+        reward -= (1 - distance)/2.0
+    if abs(angle_robot_person) < 45:
+        reward += 0.2 * (45 - abs(angle_robot_person)) / 45
+    else:
+        reward -= 0.1 * abs(angle_robot_person) / 180
+
+    # if not 90 > angle_robot_person > 0:
+    #     reward -= distance/6.0
+    # elif self.min_distance < distance < self.max_distance:
+    #     reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
+    # elif distance < self.min_distance:
+    #     reward -= 1 - distance / self.min_distance
+    # else:
+    #     reward -= distance / 7.0
+    reward = min(max(reward, -1), 1)
+    # ToDO check for obstacle
+    return reward
+
 def get_relative_heading_position(relative, center):
         relative_orientation = relative[2]
         center_pos = np.asarray(center[0:2])
@@ -28,9 +59,17 @@ def get_relative_heading_position(relative, center):
 
         return angle_relative, relative_pos
 
+def wrap_pi_pi(angle):
+    while (angle > math.pi):
+        angle -= math.pi * 2
+    while (angle < -math.pi):
+        angle += math.pi * 2
+    return angle
+
 class LogParser():
     def __init__(self, folder):
         log_files = [(f, join(folder, f)) for f in listdir(folder) if isfile(join(folder, f))]
+        print(log_files)
         for log_file in log_files:
             with open(log_file[1], "rb") as file:
                 log_unpacked = pickle.load(file)
@@ -41,17 +80,25 @@ class LogParser():
                 angle_relatives = []
                 distances = []
                 relative_poses = []
+                rewards = []
+                prev_angle = None
                 for i in range(len(log_unpacked["robot_history"])):
                     angle_relative, relative_pos = get_relative_heading_position(log_unpacked["robot_history"][i], log_unpacked["person_history"][i])
                     relative_poses.append(relative_pos)
                     distances.append(math.hypot(relative_pos[0], relative_pos[1]))
+                    if prev_angle is not None and abs(wrap_pi_pi(angle_relative - prev_angle)) > math.pi/7:
+                        angle_relative = prev_angle
+                    prev_angle = angle_relative
+                    reward = get_reward(angle_relative, relative_pos)
+                    rewards.append(reward)
                     angle_relatives.append(np.rad2deg(angle_relative))
+                  
                 plt.subplot(4, 1, 1)
                 plt.plot(angle_relatives)
                 plt.subplot(3, 1, 2)
                 plt.plot(distances)
                 plt.subplot(3, 1, 3)
-                plt.plot(relative_poses)
+                plt.plot(rewards)
                 plt.show()
 
 
@@ -754,70 +801,7 @@ class GazeboEnv():
                 break
         return pos_goal, angle_distance
 
-    def get_reward(self):
-        reward = 0
-        if self.use_goal:
-            point_goal = (self.path["points"][self.current_path_idx + 1][0], self.path["points"][self.current_path_idx + 1][1])
-            try:
-                pos_robot = self.robot.get_pos()
-            except Exception as e:
-                self.node.get_logger().error("get pos error in get_reward return 0")
-                return 0
-            distance_goal = math.hypot(pos_robot[1] - point_goal[1], pos_robot[0] - point_goal[0])
-            # reward = max (-distance_goal/3.0, -0.9) + 0.4 # between -0.5,0.4
-            robot_pos_heading = np.asarray(
-                    [pos_robot[0] + math.cos(self.robot.orientation), pos_robot[1] + math.sin(self.robot.orientation)])
-            p23 = math.hypot(robot_pos_heading[1]-point_goal[1], robot_pos_heading[0]-point_goal[0])
-            p12 = math.hypot(pos_robot[1]-robot_pos_heading[1], pos_robot[0]-robot_pos_heading[0])
-            p13 = math.hypot(point_goal[1]-pos_robot[1], point_goal[0]-pos_robot[0])
-            if p12 == 0:
-                p12 = 0.000001
-            if p13 == 0:
-                p13 = 0.000001
-            angle_robot_goal = np.rad2deg(math.acos(max(min((p12*p12+ p13*p13- p23*p23) / (2.0 * p12 * p13), 1), -1)))
-            reward += ((60 - angle_robot_goal)/120.0)/2 +0.25 # between -0.25,0.5
-            angle_robot_person, pos_rel = GazeboEnv.get_relative_heading_position(self.robot, self.person, self.manager.node)
-            distance = math.hypot(pos_rel[0], pos_rel[1])
-
-            if distance < 1.5:
-                reward -= (1.5-distance)/2.0
-            elif distance > 2.5:
-                reward -= (distance-2.5)/2.0
-            else: # distance between 1.5 to 2.5
-                reward += 0.5 - abs(distance-2)/2.0 # between 0.25-0.5
-        else:
-            angle_robot_person, pos_rel = GazeboEnv.get_relative_heading_position(self.robot, self.person, self.manager.node)
-            angle_robot_person = math.atan2(pos_rel[1], pos_rel[0])
-            angle_robot_person = np.rad2deg(angle_robot_person)
-            distance = math.hypot(pos_rel[0], pos_rel[1])
-            # Negative reward for being behind the person
-            if self.is_collided():
-                reward -= 1
-            if distance < 0.3:
-                reward = -1.3
-            elif abs(distance - 1.7) < 0.7:
-                reward += 0.1 * (0.7 - abs(distance - 1.7))
-            elif distance >= 1.7:
-                reward -= 0.25 * (distance - 1.7)
-            elif distance < 1:
-                reward -= (1 - distance)/2.0
-            if abs(angle_robot_person) < 45:
-                reward += 0.2 * (45 - abs(angle_robot_person)) / 45
-            else:
-                reward -= 0.1 * abs(angle_robot_person) / 180
-
-            # if not 90 > angle_robot_person > 0:
-            #     reward -= distance/6.0
-            # elif self.min_distance < distance < self.max_distance:
-            #     reward += 0.1 + (90 - angle_robot_person) * 0.9 / 90
-            # elif distance < self.min_distance:
-            #     reward -= 1 - distance / self.min_distance
-            # else:
-            #     reward -= distance / 7.0
-            reward = min(max(reward, -1), 1)
-            # ToDO check for obstacle
-        return reward
-
+   
     def clock_cb(self, msg):
         if self.manager is not None:
             self.manager.current_time = msg.clock.sec + msg.clock.nanosec*0.000000001
@@ -879,5 +863,5 @@ class GazeboEnv():
     def render(self, mode='human', close=False):
         """ Viewer only supports human mode currently. """
         return
-LogParser("/tmp/follow_ahead_rl/scripts/data_test")
+LogParser("data_test")
 # gazebo = GazeboEnv()
