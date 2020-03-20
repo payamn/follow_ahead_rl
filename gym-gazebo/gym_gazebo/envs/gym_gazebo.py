@@ -80,7 +80,7 @@ class Manager:
         #return self.time.now().nanoseconds/1000000000.0
         while self.current_time is None:
             time.sleep(0.001)
-            self.node.get_logger().warn("waiting for time")
+            self.node.get_logger().debug("waiting for time")
         return self.current_time
     def remove_object(self, name):
         # self.pause()
@@ -467,7 +467,7 @@ class Robot():
             if self.reset:
                 return (None, None)
             if counter_problem > 20:
-                self.node.get_logger().warn("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
+                self.node.get_logger().debug("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
             time.sleep(0.001)
             counter_problem += 1
             if counter_problem > 200:
@@ -670,7 +670,7 @@ class GazeboEnv(gym.Env):
             if robot.relative is not None and not robot.relative.reset:
                 orientation_rel, position_rel = GazeboEnv.get_relative_heading_position(robot, robot.relative, robot.manager.node)
                 if orientation_rel is None or position_rel is None:
-                    robot.manager.node.get_logger().error('orientation or pos is none')
+                    robot.manager.node.get_logger().debug('orientation or pos is none')
                 else:
                     self.node.get_logger().debug("agent: {} pos_rel: {:2.2f} {:2.2f}, orientation: {:2.2f}".format(self.agent_num, position_rel[0], position_rel[1], np.rad2deg(orientation_rel)))
                     robot.relative_orientation_history.add_element(orientation_rel, robot.manager.get_time_sec())
@@ -701,10 +701,10 @@ class GazeboEnv(gym.Env):
     def get_relative_heading_position(relative, center, node):
         while not relative.is_current_state_ready() or not center.is_current_state_ready():
             if relative.reset:
-                node.get_logger().warn("reseting so return none in rel pos rel: {} center".format(relative.is_current_state_ready(), center.is_current_state_ready()))
+                node.get_logger().debug("reseting so return none in rel pos rel: {} center".format(relative.is_current_state_ready(), center.is_current_state_ready()))
                 return (None, None)
             time.sleep(0.01)
-            node.get_logger().info ("waiting for observation to be ready")
+            node.get_logger().debug ("waiting for observation to be ready")
         relative_orientation = relative.state_['orientation']
         center_pos = np.asarray(center.state_['position'])
         center_orientation = center.state_['orientation']
@@ -731,16 +731,16 @@ class GazeboEnv(gym.Env):
         counter = 0
         while self.is_pause:
             if self.is_reseting:
-                self.node.get_logger().info( "path follower return as reseting ")
+                self.node.get_logger().debug( "path follower return as reseting ")
                 return
             time.sleep(0.001)
             if counter > 10000:
-                self.node.get_logger().info( "path follower waiting for pause to be false")
+                self.node.get_logger().debug( "path follower waiting for pause to be false")
                 counter = 0
             counter += 1
-        self.node.get_logger().info( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
+        self.node.get_logger().debug( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
         if self.lock.acquire(timeout=10):
-            self.node.get_logger().info("path follower got the lock")
+            self.node.get_logger().debug("path follower got the lock")
             if self.test_simulation_:
                 mode_person = -1
             elif self.is_evaluation_:
@@ -753,7 +753,7 @@ class GazeboEnv(gym.Env):
                 counter_pause = 0
                 while self.is_pause:
                     counter_pause+=1
-                    self.node.get_logger().info("pause in path follower")
+                    self.node.get_logger().debug("pause in path follower")
                     if self.is_reseting or counter_pause > 200:
                         self.lock.release()
                         return
@@ -779,10 +779,10 @@ class GazeboEnv(gym.Env):
                     self.person.stop_robot()
                     break
             self.lock.release()
-            self.node.get_logger().info("path follower release the lock")
+            self.node.get_logger().debug("path follower release the lock")
             self.path_finished = True
         else:
-            self.node.get_logger().error("problem in getting the log in path follower")
+            self.node.get_logger().debug("problem in getting the log in path follower")
         # robot.stop_robot()
 
     def get_laser_scan(self):
@@ -796,7 +796,7 @@ class GazeboEnv(gym.Env):
             time.sleep(0.005)
             counter +=1
             if counter > 100:
-                self.node.get_logger().info("wait for laser scan to get filled sec: {}/25".format(counter / 10))
+                self.node.get_logger().debug("wait for laser scan to get filled sec: {}/25".format(counter / 10))
         if counter>=250:
             raise RuntimeError(
                 'exception while calling get_laser_scan:')
@@ -839,7 +839,7 @@ class GazeboEnv(gym.Env):
             if self.is_reseting:
                 return None
             time.sleep(0.001)
-            self.node.get_logger().error("waiting to get pos/vel pos: {} vel: {} vel_person: {}".format(self.robot.relative_pos_history.avg_frame_rate ,self.robot.velocity_history.avg_frame_rate, self.person.velocity_history.avg_frame_rate))
+            self.node.get_logger().debug("waiting to get pos/vel pos: {} vel: {} vel_person: {}".format(self.robot.relative_pos_history.avg_frame_rate ,self.robot.velocity_history.avg_frame_rate, self.person.velocity_history.avg_frame_rate))
         pose_history = np.asarray(self.robot.relative_pos_history.get_elemets()).flatten()/5.0
         heading_history = np.asarray(self.robot.relative_orientation_history.get_elemets())/math.pi
         # self.visualize_observation(poses, headings, self.get_laser_scan())
@@ -851,7 +851,7 @@ class GazeboEnv(gym.Env):
 
     def reset_gazebo(self, no_manager=False):
 
-        self.node.get_logger().error( "reset gazebo")
+        self.node.get_logger().debug( "reset gazebo")
         subprocess.call('pkill -9 gzclient', shell=True)
         subprocess.call('tmux kill-session -t gazebo', shell=True)
         subprocess.Popen(['tmux', 'new-session', '-d', '-s', 'gazebo'])
@@ -883,19 +883,23 @@ class GazeboEnv(gym.Env):
 
         distance = math.hypot(rel_person[0], rel_person[1])
         if self.path_finished:
-            self.node.get_logger().info("path finished")
+            if self.agent_num==0:
+                self.node.get_logger().info("path finished")
             episode_over = True
         if self.is_collided():
             episode_over = True
-            self.node.get_logger().info('collision happened episode over')
+            if self.agent_num==0:
+                self.node.get_logger().info('collision happened episode over')
             reward -= 0.5
         elif distance > 5:
             episode_over = True
             reward -= 0.5
-            self.node.get_logger().info('max distance happened episode over')
+            if self.agent_num==0:
+                self.node.get_logger().info('max distance happened episode over')
         elif self.number_of_steps > self.max_numb_steps:
             episode_over = True
-            self.node.get_logger().info('max number of steps episode over')
+            if self.agent_num==0:
+                self.node.get_logger().info('max number of steps episode over')
         reward = min(max(reward, -1), 1)
         self.node.get_logger().debug("agent: {} action {} reward {}".format((self.agent_num),action, reward))
         self.prev_action = action
@@ -927,7 +931,7 @@ class GazeboEnv(gym.Env):
             try:
                 pos_robot = self.robot.get_pos()
             except Exception as e:
-                self.node.get_logger().error("get pos error in get_reward return 0")
+                self.node.get_logger().debug("get pos error in get_reward return 0")
                 return 0
             distance_goal = math.hypot(pos_robot[1] - point_goal[1], pos_robot[0] - point_goal[0])
             # reward = max (-distance_goal/3.0, -0.9) + 0.4 # between -0.5,0.4
@@ -964,11 +968,11 @@ class GazeboEnv(gym.Env):
             elif abs(distance - 1.7) < 0.7:
                 reward += 0.1 * (0.7 - abs(distance - 1.7))
             elif distance >= 1.7:
-                reward -= 0.20 * (distance - 1.7)
+                reward -= 0.25 * (distance - 1.7)
             elif distance < 1:
                 reward -= (1 - distance)/2.0
             if abs(angle_robot_person) < 45:
-                reward += 0.15 * (45 - abs(angle_robot_person)) / 45
+                reward += 0.2 * (45 - abs(angle_robot_person)) / 45
             else:
                 reward -= 0.1 * abs(angle_robot_person) / 180
 
@@ -977,8 +981,9 @@ class GazeboEnv(gym.Env):
             if abs(self.prev_action[1] - action[1])>0.5:
                 control_reward = (abs(self.prev_action[1] - action[1])/2 - 0.25)
 
-            self.node.get_logger().debug("agent: {} control_reward is: {} prv/now: {} {}".format(self.agent_num, control_reward, self.prev_action[1], action[1]))
-            reward -= control_reward/5
+            # self.node.get_logger().debug("agent: {} control_reward is: {} prv/now: {} {}".format(self.agent_num, control_reward, self.prev_action[1], action[1]))
+            #reward -= control_reward/5
+            reward *= 0.87
 
             reward = min(max(reward, -1), 1)
             # ToDO check for obstacle
@@ -991,7 +996,7 @@ class GazeboEnv(gym.Env):
     def observation_after_reset_done(self):
         while self.is_reseting:
             time.sleep(0.01)
-            rospy.get_logger().warn("reset called when was already resetting")
+            rospy.get_logger().debug("reset called when was already resetting")
 
         return self.get_observation()
 
@@ -1004,12 +1009,12 @@ class GazeboEnv(gym.Env):
         self.is_reseting = True
         self.robot.reset = True
         self.person.reset = True
-        self.node.get_logger().info("trying to get the lock for reset")
+        self.node.get_logger().debug("trying to get the lock for reset")
         # if reset_gazebo:
         #     self.reset_gazebo()
         with self.lock:
 
-            self.node.get_logger().info("got the lock")
+            self.node.get_logger().debug("got the lock")
             # self.node.get_logger().info("got the lock")
             # try:
             #     # self.manager.pause()
@@ -1025,9 +1030,9 @@ class GazeboEnv(gym.Env):
             try:
                 if self.position_thread.isAlive():
 
-                    self.node.get_logger().info("wait for position thread to join")
+                    self.node.get_logger().debug("wait for position thread to join")
                     self.position_thread.join()
-                    self.node.get_logger().info("position thread joined")
+                    self.node.get_logger().debug("position thread joined")
                 if self.is_evaluation_:
                     if self.log_file is not None:
                         pickle.dump({"person_history":self.person.log_history, "robot_history":self.robot.log_history}, self.log_file)
