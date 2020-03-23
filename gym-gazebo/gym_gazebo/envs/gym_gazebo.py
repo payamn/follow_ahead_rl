@@ -1027,7 +1027,7 @@ class GazeboEnv(gym.Env):
             if self.agent_num==0 or self.agent_num==3:
                 self.node.get_logger().info('agent: {} collision happened episode over'.format(self.agent_num))
             #reward -= 0.5
-        elif distance > 5:
+        elif distance > 2.5:
             episode_over = True
             #reward -= 0.5
             if self.agent_num==0 or self.agent_num==3:
