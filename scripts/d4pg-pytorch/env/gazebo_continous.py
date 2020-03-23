@@ -10,4 +10,4 @@ class GazeboContinous(EnvWrapper):
         return state
 
     def normalise_reward(self, reward):
-        return reward / 100.0
+        return reward / 200

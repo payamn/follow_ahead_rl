@@ -20,8 +20,7 @@ def _l2_project(z_p, p, z_q):
     """
     # Broadcasting of tensors is used extensively in the code below. To avoid
     # accidental broadcasting along unintended dimensions, tensors are defensively
-    # reshaped to have equal number of dimensions (3) throughout and intended
-    # shapes are indicated alongside tensor definitions. To reduce verbosity,
+    # reshaped to have equal number of dimensions (3) throughout and intended # shapes are indicated alongside tensor definitions. To reduce verbosity,
     # extra dimensions of size 1 are inserted by indexing with `None` instead of
     # `tf.expand_dims()` (e.g., `x[:, None, :]` reshapes a tensor of shape
     # `[k, l]' to one of shape `[k, 1, l]`).

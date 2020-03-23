@@ -91,6 +91,7 @@ def agent_worker(config, policy, learner_w_queue, global_episode, i, agent_type,
 class Engine(object):
     def __init__(self, config):
         self.config = config
+        self.use_supervisor = True
 
     def train(self):
         config = self.config
@@ -141,16 +142,20 @@ class Engine(object):
         processes.append(p)
 
         # Agents (exploration processes)
-        for i in range(1, n_agents-1):
+        if self.use_supervisor:
+            n_agents -= 1
+
+        for i in range(1, n_agents):
             p = torch_mp.Process(target=agent_worker,
                                  args=(config, policy_net, learner_w_queue, global_episode, i, "exploration", experiment_dir,
                                        training_on, replay_queue, update_step))
             processes.append(p)
 
-        p = torch_mp.Process(target=agent_worker,
-                             args=(config, target_policy_net, None, global_episode, i+1, "supervisor", experiment_dir,
-                                   training_on, replay_queue, update_step))
-        processes.append(p)
+        if self.use_supervisor:
+            p = torch_mp.Process(target=agent_worker,
+                                 args=(config, target_policy_net, learner_w_queue, global_episode, i+1, "supervisor", experiment_dir,
+                                       training_on, replay_queue, update_step))
+            processes.append(p)
 
 
         for p in processes:

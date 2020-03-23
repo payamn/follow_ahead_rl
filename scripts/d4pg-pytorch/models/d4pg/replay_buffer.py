@@ -29,12 +29,12 @@ class ReplayBuffer(object):
     def add(self, obs_t, action, reward, obs_tp1, done, gamma):
         data = (obs_t, action, reward, obs_tp1, done, gamma)
 
-        if len(self._storage) > self._maxsize *1.3:
-            self.remove(int(self._maxsize*0.3))
+        if len(self._storage) < self._maxsize:
+            self._storage.append(data)
+        else:
+            self._storage[self._next_idx] = data
 
-        self._storage.append(data)
-
-        self._next_idx += 1
+        self._next_idx = (self._next_idx + 1) % self._maxsize
 
     def remove(self, num_samples):
         del self._storage[:num_samples]
