@@ -131,6 +131,9 @@ class Agent(object):
                 self.logger.scalar_summary("agent/angle_var", np.rad2deg(np.var(angle_avg)), step)
                 self.logger.scalar_summary("agent/distance", np.mean(distance_avg), step)
                 self.logger.scalar_summary("agent/distance_var", np.var(distance_avg), step)
+                observation_image = self.env_wrapper.env.get_current_observation_image()
+                self.logger.image_summar("agent/observation", observation_image, step)
+
             self.logger.scalar_summary("agent/reward", episode_reward, step)
             self.logger.scalar_summary("agent/episode_timing", time.time() - ep_start_time, step)
 

@@ -548,11 +548,15 @@ class GazeboEnv(gym.Env):
         self.use_random_around_person_ = False
         self.robot_thread = None
 
+        # being use for observation visualization
+        self.center_pos_ = (0, 0)
+
         self.action_mode_ = "point"
         self.test_simulation_ = False
         self.is_reseting = True
         self.lock = _thread.allocate_lock()
         self.robot_mode = 1
+        self.current_obsevation_image_ = np.zeros([500,500,3])
 
         self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(72,))
         # gym.spaces.Tuple(
@@ -682,13 +686,15 @@ class GazeboEnv(gym.Env):
         self.number_of_steps = 0
         self.node.get_logger().debug("init simulation called")
         self.is_pause = True
-
         if not self.test_simulation_:
 
             init_pos_robot, init_pos_person = self.get_init_pos_robot_person()
+            self.center_pos_ = init_pos_person["pos"]
+            self.current_obsevation_image_ = np.zeros([500,500,3])
             self.robot.update(init_pos_robot)
             self.person.update(init_pos_person)
             self.prev_action = (0,0)
+
 
         self.path_finished = False
         self.position_thread = threading.Thread(target=self.path_follower, args=(self.current_path_idx, self.robot,))
@@ -743,6 +749,25 @@ class GazeboEnv(gym.Env):
             linear_vel = twist.linear.x
             angular_Vel = twist.angular.z
             robot.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), robot.manager.get_time_sec())
+
+    def add_observation_to_image(self, pos, color, radious):
+        to_image_fun = lambda x: (int((x[0] - self.center_pos[0])*25.-250), int((x[1] - self.center_pos[1])*25.-250))
+        pos_image = to_image_fun(pos)
+        if pos_image[0] >500 or pos_image[0] < 0 or pos_image[1] >500 or pos_image[1] < 0:
+            self.node.get_logger().error("problem with observation: {}".format(pos_image))
+            return
+        self.current_obsevation_image_ = cv.circle(self.current_obsevation_image_, (pos_image[0], pos_image[1]), radious, color, -1)
+
+    def update_observation_image(self):
+        robot_pos = self.robot.get_pos()
+        person_pos = self.person.get_pos()
+        current_goal = self.robot.goal
+        self.add_observation_to_image(robot_pos, [255,0,0], 4)
+        self.add_observation_to_image(person_pos, [255,255,0], 4)
+        self.add_observation_to_image(current_goal, [0,0,255], 4)
+
+    def get_current_observation_image(self):
+        return self.current_obsevation_image_
 
     def pause(self):
         self.is_pause = True
@@ -983,6 +1008,7 @@ class GazeboEnv(gym.Env):
         if self.test_simulation_:
             return
         self.robot.take_action(action, self.person)
+        self.update_observation_image()
         return
 
 
