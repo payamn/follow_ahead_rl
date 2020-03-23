@@ -550,6 +550,9 @@ class GazeboEnv(gym.Env):
 
         # being use for observation visualization
         self.center_pos_ = (0, 0)
+        self.robot_color = [255,0,0]
+        self.person_color = [0,0,255]
+        self.goal_color = [0,255,0]
 
         self.action_mode_ = "point"
         self.test_simulation_ = False
@@ -557,6 +560,7 @@ class GazeboEnv(gym.Env):
         self.lock = _thread.allocate_lock()
         self.robot_mode = 1
         self.current_obsevation_image_ = np.zeros([500,500,3])
+        self.current_obsevation_image_.fill(255)
 
         self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(72,))
         # gym.spaces.Tuple(
@@ -690,11 +694,14 @@ class GazeboEnv(gym.Env):
 
             init_pos_robot, init_pos_person = self.get_init_pos_robot_person()
             self.center_pos_ = init_pos_person["pos"]
-            self.current_obsevation_image_ = np.zeros([500,500,3])
+            self.current_obsevation_image_.fill(255)
             self.robot.update(init_pos_robot)
             self.person.update(init_pos_person)
             self.prev_action = (0,0)
 
+        self.robot_color = [255,0,0]
+        self.person_color = [0,0,255]
+        self.goal_color = [0,255,0]
 
         self.path_finished = False
         self.position_thread = threading.Thread(target=self.path_follower, args=(self.current_path_idx, self.robot,))
@@ -751,23 +758,37 @@ class GazeboEnv(gym.Env):
             robot.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), robot.manager.get_time_sec())
 
     def add_observation_to_image(self, pos, color, radious):
-        to_image_fun = lambda x: (int((x[0] - self.center_pos[0])*25.-250), int((x[1] - self.center_pos[1])*25.-250))
+        to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*25.+250), int((x[1] - self.center_pos_[1])*25.+250))
         pos_image = to_image_fun(pos)
         if pos_image[0] >500 or pos_image[0] < 0 or pos_image[1] >500 or pos_image[1] < 0:
             self.node.get_logger().error("problem with observation: {}".format(pos_image))
             return
         self.current_obsevation_image_ = cv.circle(self.current_obsevation_image_, (pos_image[0], pos_image[1]), radious, color, -1)
 
+    def darken_all_colors(self):
+        darken_fun = lambda x: [max(y-1, 10) for y in x]
+        self.robot_color = darken_fun(self.robot_color)
+        self.person_color = darken_fun(self.person_color)
+        self.goal_color = darken_fun(self.goal_color)
+
+
+
     def update_observation_image(self):
         robot_pos = self.robot.get_pos()
         person_pos = self.person.get_pos()
         current_goal = self.robot.goal
-        self.add_observation_to_image(robot_pos, [255,0,0], 4)
-        self.add_observation_to_image(person_pos, [255,255,0], 4)
-        self.add_observation_to_image(current_goal, [0,0,255], 4)
+        self.add_observation_to_image(robot_pos, self.robot_color, 2)
+        self.add_observation_to_image(person_pos, self.person_color, 2)
+        self.add_observation_to_image(current_goal, self.goal_color, 2)
+        self.darken_all_colors()
+
 
     def get_current_observation_image(self):
-        return self.current_obsevation_image_
+
+        image = self.current_obsevation_image_
+        image = image/255.
+
+        return image
 
     def pause(self):
         self.is_pause = True
