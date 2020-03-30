@@ -73,8 +73,7 @@ class Agent(object):
             angle_avg = []
             distance_avg = []
             while not done:
-                if self.agent_type != "supervisor":
-                    action = self.actor.get_action(state)
+                action = self.actor.get_action(state)
                 if self.agent_type == "supervisor":
                     action = self.env_wrapper.env.get_supervised_action()
                 elif self.agent_type == "exploration":
@@ -132,7 +131,10 @@ class Agent(object):
                 self.logger.scalar_summary("agent/distance", np.mean(distance_avg), step)
                 self.logger.scalar_summary("agent/distance_var", np.var(distance_avg), step)
                 observation_image = self.env_wrapper.env.get_current_observation_image()
-                self.logger.image_summar("agent/observation", observation_image, step)
+                if num_steps == self.max_steps:
+                    self.logger.image_summar("agent/observation_end", observation_image, num_steps)
+                else:
+                    self.logger.image_summar("agent/observation_p_{:2.3f}".format(discounted_reward), observation_image, num_steps)
 
             self.logger.scalar_summary("agent/reward", episode_reward, step)
             self.logger.scalar_summary("agent/episode_timing", time.time() - ep_start_time, step)

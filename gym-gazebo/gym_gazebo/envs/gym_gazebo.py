@@ -166,12 +166,14 @@ class Manager:
     def reset(self):
         pass
 
+
 class History():
     def __init__(self, memory_size, window_size, rate, manager):
         self.data = [None for x in range(memory_size)]
         self.idx = 0
         self.manager = manager
         self.update_rate = rate
+        self.lock = _thread.allocate_lock()
         self.memory_size = memory_size
         self.window_size = window_size
         self.avg_frame_rate = None
@@ -182,34 +184,42 @@ class History():
         element: the data that we put inside the history data array
         time_data: in second the arrive time of data (get it from ros msg time)
         """
-        self.idx = (self.idx + 1) % self.window_size
+        with self.lock:
+            self.idx = (self.idx + 1) % self.window_size
 
-        if self.data[self.idx] is None:
-            for idx in range(self.memory_size):
-                self.data[idx] = element
-        self.data[self.idx] = element
-        if not len(self.time_data_) > 50:
-            self.time_data_.append(time_data)
-            if len(self.time_data_) > 3:
-                prev_t = self.time_data_[0]
-                time_intervals = []
-                for t in self.time_data_[1:]:
-                    time_intervals.append(t - prev_t)
-                    prev_t = t
-                self.avg_frame_rate = 1.0 / np.average(time_intervals)
+            if self.data[self.idx] is None:
+                for idx in range(self.memory_size):
+                    self.data[idx] = element
+            self.data[self.idx] = element
+            if not len(self.time_data_) > 50:
+                self.time_data_.append(time_data)
+                if len(self.time_data_) > 3:
+                    prev_t = self.time_data_[0]
+                    time_intervals = []
+                    for t in self.time_data_[1:]:
+                        time_intervals.append(t - prev_t)
+                        prev_t = t
+                    self.avg_frame_rate = 1.0 / np.average(time_intervals)
 
 
     def get_elemets(self):
         return_data = []
         skip_frames = -int(math.ceil(self.avg_frame_rate / self.update_rate))
-        index = (self.idx - 1)% self.window_size
-        if self.window_size * skip_frames >= self.memory_size:
-            print("error in get element memory not enough")
-        for i in range (self.window_size):
-            return_data.append(self.data[index])
-            index = (index + skip_frames) % self.window_size
+        with self.lock:
+            index = self.idx #(self.idx - 1)% self.window_size
+            if self.window_size * skip_frames >= self.memory_size:
+                print("error in get element memory not enough")
+            for i in range (self.window_size):
+                return_data.append(self.data[index])
+                index = (index + skip_frames) % self.window_size
 
         return return_data
+
+    def get_latest(self):
+        with self.lock:
+            return self.data[self.idx]
+
+
 
 class Robot():
     def __init__(self, name, init_pos, manager, node, max_angular_speed=1, max_linear_speed=1, relative=None, action_mode="pos"):
@@ -435,7 +445,7 @@ class Robot():
                 linear_vel = self.max_linear_vel/2
                 angular_vel = -self.max_angular_vel/2
             elif person_mode == 4:
-                linear_vel = self.max_linear_vel
+                linear_vel = self.max_linear_vel * random.random()
                 angular_vel = 0
             elif person_mode == 5:
                 linear_vel = self.max_linear_vel/4
@@ -542,10 +552,11 @@ class GazeboEnv(gym.Env):
 
         self.use_goal = False
         self.is_evaluation_ = is_evaluation
+        self.wait_counter_ = 0
 
         # curriculam param
-        self.max_mod_person_ = 7
-        self.use_random_around_person_ = False
+        self.max_mod_person_ = 0
+        self.use_random_around_person_ = True
         self.robot_thread = None
 
         # being use for observation visualization
@@ -559,7 +570,7 @@ class GazeboEnv(gym.Env):
         self.is_reseting = True
         self.lock = _thread.allocate_lock()
         self.robot_mode = 1
-        self.current_obsevation_image_ = np.zeros([500,500,3])
+        self.current_obsevation_image_ = np.zeros([2000,2000,3])
         self.current_obsevation_image_.fill(255)
 
         self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(72,))
@@ -578,8 +589,8 @@ class GazeboEnv(gym.Env):
         if self.test_simulation_ or self.is_evaluation_:
            self.max_numb_steps = 1000000000000000000
         else:
-            self.max_numb_steps = 500
-        self.reward_range = [0, 2]
+            self.max_numb_steps = 400
+        self.reward_range = [-1, 1]
         self.manager = None
 
     def set_agent(self, agent_num):
@@ -650,7 +661,8 @@ class GazeboEnv(gym.Env):
         elif self.use_random_around_person_:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
             init_pos_robot = {"pos": self.find_random_point_in_circle(3, 1, self.path["points"][idx_start]),\
-                              "orientation": random.random()*2*math.pi - math.pi}
+                              "orientation": self.calculate_angle_using_path(idx_start)}
+                              #random.random()*2*math.pi - math.pi}
         else:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
             idx_robot = idx_start + 1
@@ -702,6 +714,7 @@ class GazeboEnv(gym.Env):
         self.robot_color = [255,0,0]
         self.person_color = [0,0,255]
         self.goal_color = [0,255,0]
+        self.wait_counter_ = 5
 
         self.path_finished = False
         self.position_thread = threading.Thread(target=self.path_follower, args=(self.current_path_idx, self.robot,))
@@ -723,7 +736,14 @@ class GazeboEnv(gym.Env):
                 self.state_cb_prev_time = self.manager.get_time_sec()
             return
 
+        if self.state_cb_prev_time is not None and self.manager.get_time_sec() - self.state_cb_prev_time > 0.1:
+            self.wait_counter_ = 3
+
         self.state_cb_prev_time = self.manager.get_time_sec()
+        if self.wait_counter_ > 0:
+            self.wait_counter_ -= 1
+            return
+
         for model_idx in range(len(states_msg.name)):
             if states_msg.name[model_idx] == self.person.name:
                 robot = self.person
@@ -758,9 +778,9 @@ class GazeboEnv(gym.Env):
             robot.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), robot.manager.get_time_sec())
 
     def add_observation_to_image(self, pos, color, radious):
-        to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*25.+250), int((x[1] - self.center_pos_[1])*25.+250))
+        to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
         pos_image = to_image_fun(pos)
-        if pos_image[0] >500 or pos_image[0] < 0 or pos_image[1] >500 or pos_image[1] < 0:
+        if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             self.node.get_logger().error("problem with observation: {}".format(pos_image))
             return
         self.current_obsevation_image_ = cv.circle(self.current_obsevation_image_, (pos_image[0], pos_image[1]), radious, color, -1)
@@ -894,7 +914,7 @@ class GazeboEnv(gym.Env):
             elif self.is_evaluation_:
                 mode_person = 2
             else:
-                mode_person = random.randint(0, self.max_mod_person_)
+                mode_person = 4#random.randint(0, self.max_mod_person_)
             # if mode_person == 0:
             #     person_thread = threading.Thread(target=self.person.go_to_goal, args=())
             #     person_thread.start()
@@ -1058,7 +1078,7 @@ class GazeboEnv(gym.Env):
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
-        time.sleep(0.001)
+        time.sleep(0.08)
         reward = self.get_reward(action)
         ob = self.get_observation()
         episode_over = False
@@ -1066,27 +1086,27 @@ class GazeboEnv(gym.Env):
 
         distance = math.hypot(rel_person[0], rel_person[1])
         if self.path_finished:
-            if self.agent_num==0 or self.agent_num==3:
+            if self.agent_num==0:
                 self.node.get_logger().info("path finished")
             episode_over = True
         if self.is_collided():
             episode_over = True
-            if self.agent_num==0 or self.agent_num==3:
+            if self.agent_num==0:
                 self.node.get_logger().info('agent: {} collision happened episode over'.format(self.agent_num))
             #reward -= 0.5
-        elif distance > 2.5:
+        elif distance > 4.5:
             episode_over = True
             #reward -= 0.5
-            if self.agent_num==0 or self.agent_num==3:
+            if self.agent_num==0:
                 self.node.get_logger().info('agent: {} max distance happened episode over'.format(self.agent_num))
         elif self.number_of_steps > self.max_numb_steps:
             episode_over = True
-            if self.agent_num==0 or self.agent_num==3:
+            if self.agent_num==0:
                 self.node.get_logger().info('agent: {} max number of steps episode over'.format(self.agent_num))
         reward = min(max(reward, -1), 1)
         self.node.get_logger().debug("agent: {} action {} reward {}".format((self.agent_num),action, reward))
         self.prev_action = action
-        reward += 1
+        #reward += 1
         return ob, reward, episode_over, {}
 
     def is_collided(self):
