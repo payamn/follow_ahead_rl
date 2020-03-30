@@ -24,7 +24,7 @@ priority_beta_start: 0.4 # starting value of beta - controls to what degree IS w
 priority_beta_end: 0.75 # beta will be linearly annelaed from its start value to this value thoughout training
 discount_rate: 0.95 # Discount rate (gamma) for future rewards
 n_step_returns: 10 # number of future steps to collect experiences for N-step returns
-update_agent_ep: 1 # agent gets latest parameters from learner every update_agent_ep episodes
+update_agent_ep: 4 # agent gets latest parameters from learner every update_agent_ep episodes
 replay_queue_size: 4000 # queue with replays from all the agents
 batch_queue_size: 1000 # queue with batches given to learner
 replay_memory_prioritized: 0
@@ -36,9 +36,9 @@ device: cuda
 
 critic_learning_rate: 0.0002
 actor_learning_rate: 0.0002
-dense_size: 1024 # size of the 2 hidden layers in networks
+dense_size: 512 # size of the 2 hidden layers in networks
 final_layer_init: 0.004
-num_atoms: 512 # number of atoms in output layer of distributed critic
+num_atoms: 1024 # number of atoms in output layer of distributed critic
 v_min: -100.0 # lower bound of critic value output distribution
 v_max: 0.0 # upper bound of critic value output distribution
 tau: 0.002 # parameter for soft target network updates

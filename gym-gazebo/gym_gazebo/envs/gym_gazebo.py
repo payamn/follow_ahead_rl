@@ -1,6 +1,5 @@
 from gym.utils import seeding
 
-
 import os, subprocess, time, signal
 
 import gym
@@ -82,6 +81,7 @@ class Manager:
             time.sleep(0.001)
             self.node.get_logger().debug("waiting for time")
         return self.current_time
+
     def remove_object(self, name):
         # self.pause()
         if not self.client_delete.service_is_ready():
@@ -172,6 +172,7 @@ class History():
         self.idx = 0
         self.manager = manager
         self.update_rate = rate
+        self.lock = _thread.allocate_lock()
         self.memory_size = memory_size
         self.window_size = window_size
         self.avg_frame_rate = None
@@ -182,34 +183,40 @@ class History():
         element: the data that we put inside the history data array
         time_data: in second the arrive time of data (get it from ros msg time)
         """
-        self.idx = (self.idx + 1) % self.window_size
+        with self.lock:
+            self.idx = (self.idx + 1) % self.window_size
 
-        if self.data[self.idx] is None:
-            for idx in range(self.memory_size):
-                self.data[idx] = element
-        self.data[self.idx] = element
-        if not len(self.time_data_) > 50:
-            self.time_data_.append(time_data)
-            if len(self.time_data_) > 3:
-                prev_t = self.time_data_[0]
-                time_intervals = []
-                for t in self.time_data_[1:]:
-                    time_intervals.append(t - prev_t)
-                    prev_t = t
-                self.avg_frame_rate = 1.0 / np.average(time_intervals)
+            if self.data[self.idx] is None:
+                for idx in range(self.memory_size):
+                    self.data[idx] = element
+            self.data[self.idx] = element
+            if not len(self.time_data_) > 50:
+                self.time_data_.append(time_data)
+                if len(self.time_data_) > 3:
+                    prev_t = self.time_data_[0]
+                    time_intervals = []
+                    for t in self.time_data_[1:]:
+                        time_intervals.append(t - prev_t)
+                        prev_t = t
+                    self.avg_frame_rate = 1.0 / np.average(time_intervals)
 
 
     def get_elemets(self):
         return_data = []
         skip_frames = -int(math.ceil(self.avg_frame_rate / self.update_rate))
-        index = (self.idx - 1)% self.window_size
-        if self.window_size * skip_frames >= self.memory_size:
-            print("error in get element memory not enough")
-        for i in range (self.window_size):
-            return_data.append(self.data[index])
-            index = (index + skip_frames) % self.window_size
+        with self.lock:
+            index = self.idx #(self.idx - 1)% self.window_size
+            if self.window_size * skip_frames >= self.memory_size:
+                print("error in get element memory not enough")
+            for i in range (self.window_size):
+                return_data.append(self.data[index])
+                index = (index + skip_frames) % self.window_size
 
         return return_data
+
+    def get_latest(self):
+        with self.lock:
+            return self.data[self.idx]
 
 class Robot():
     def __init__(self, name, init_pos, manager, node, max_angular_speed=1, max_linear_speed=1, relative=None, action_mode="pos"):
@@ -225,6 +232,7 @@ class Robot():
         # self.node = node
         self.init_node = True
         self.deleted = False
+        self.lock_goal_ = _thread.allocate_lock()
         self.action_mode_ = action_mode
         self.collision_distance = 0.5
         self.max_angular_vel = max_angular_speed
@@ -249,8 +257,9 @@ class Robot():
         self.is_pause = False
         self.reset = False
 
-    def update_goal(self, goal):
-        self.goal = goal
+    def update_goal(self, goal_v, goal_theta, goal_pos):
+        with self.lock_goal_:
+            self.goal = {"pos":goal_pos, "v":goal_v, "theta":goal_theta}
 
     def calculate_ahead(self, distance):
         x = self.state_['position'][0] + math.cos(self.state_["orientation"]) * distance
@@ -279,6 +288,7 @@ class Robot():
         self.velocity_history = History(200, 10, 2, self.manager)
         self.velocity_history.add_element((0,0), self.manager.get_time_sec())
         self.scan_image = None
+        self.goal = None
         self.scan_image_history = History(5, 5, 1, self.manager)
         self.log_history = []
         self.is_collided = False
@@ -299,41 +309,6 @@ class Robot():
         # self.laser_sub.destroy()
         # self.model_states_sub.destroy()
         self.reset = True
-
-    def states_cb(self, states_msg):
-        model_idx = None
-        prev_pos = self.state_["position"]
-        for i in range(len(states_msg.name)):
-            if states_msg.name[i] == self.name:
-                # self.node.get_logger().warn("statecb")
-                model_idx = i
-                break
-        if model_idx is None:
-            print("cannot find {}".format(self.name))
-            return
-
-        pos = states_msg.pose[model_idx]
-        self.state_["position"] = (pos.position.x + (random.random()-0.5)/5, pos.position.y+ (random.random()-0.5)/5)
-        euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
-        self.state_["orientation"] = euler[0] + (random.random()-0.5)*math.pi/7
-
-        if self.relative is not None and not self.relative.reset:
-            self.manager.node.get_logger().debug('before calling get rel in state cb {}'.format(self.state_))
-            orientation_rel, position_rel = GazeboEnv.get_relative_heading_position(self, self.relative, self.manager.node)
-            self.manager.node.get_logger().debug('after calling get rel in state cb ')
-            if orientation_rel is None or position_rel is None:
-                self.manager.node.get_logger().error('orientation or pos is none')
-            else:
-                self.manager.node.get_logger().debug("after state cb")
-                self.relative_orientation_history.add_element(orientation_rel, self.manager.get_time_sec())
-                self.relative_pos_history.add_element(position_rel, self.manager.get_time_sec())
-
-        # get velocity
-        twist = states_msg.twist[model_idx]
-        linear_vel = twist.linear.x + + (random.random()-0.5)/5
-        angular_Vel = twist.angular.z + (random.random()-0.5)*math.pi/7
-
-        self.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), self.manager.get_time_sec())
 
     def laser_cb(self, laser_msg):
 
@@ -360,8 +335,11 @@ class Robot():
         self.scan_image_history.add_element(scan_image)
         self.scan_image = scan_image
 
-    def get_velocity(self):
+    def get_velocities(self):
         return self.velocity_history.get_elemets()
+
+    def get_velocity(self):
+        return self.velocity_history.get_latest()
 
     def pause(self):
         self.is_pause = True
@@ -459,7 +437,7 @@ class Robot():
             while self.goal is None:
                 time.sleep(0.1)
                 continue
-            diff_angle, distance = self.angle_distance_to_point(self.goal)
+            diff_angle, distance = self.angle_distance_to_point(self.goal["pos"])
             time_prev = self.manager.get_time_sec()
             while not distance < 0.1 and abs(self.manager.get_time_sec() - time_prev) < 5:
                 if self.is_pause:
@@ -467,7 +445,11 @@ class Robot():
                     return
                 if self.reset:
                     return
-                diff_angle, distance = self.angle_distance_to_point(self.goal)
+                try:
+                    diff_angle, distance = self.angle_distance_to_point(self.goal["pos"])
+                except Exception as e:
+                    self.node.get_logger().error("exception happend in go to goal {}".format(e))
+                    break
                 if distance is None:
                     return
 
@@ -481,6 +463,162 @@ class Robot():
                 self.publish_cmd_vel(linear_vel, angular_vel)
                 time.sleep(0.01)
             self.stop_robot()
+
+    def calculate_using_dynamics(self, v_end, theta_end, pos_end, T):
+        v_start = self.get_velocity()
+        theta_start = self.state_["orientation"]
+        pos_start = self.state_["position"]
+        if v_start is None or theta_start is None or pos_start[0] is None:
+            raise Exception("values not set for calculate using dynamics")
+
+        v_start = np.asarray(v_start[0])
+        theta_start = np.asarray(theta_start)
+        pos_start  = np.asarray(pos_start)
+        x_dot_start = v_start * math.cos(theta_start)
+        x_dot_end = v_end * math.cos(theta_end)
+        y_dot_start = v_start * math.sin(theta_start)
+        y_dot_end = v_end * math.sin(theta_end)
+        start = time.time()
+        M = np.asarray([[1, 0, 0, 0], [0, 1, 0, 0],[1, T, T**2, T**3], [0, 1, 2*T, 3*T**2]])
+
+        # RHS of constraints in flat output space
+        x_constr = np.asarray([[pos_start[0]], [x_dot_start], [pos_end[0]], [x_dot_end]])
+        y_constr = np.asarray([[pos_start[1]], [y_dot_start], [pos_end[1]], [y_dot_end]])
+
+        # Solve for coefficients of basis functions
+        b0 = np.linalg.solve(M, x_constr)
+        b1 = np.linalg.solve(M, y_constr)
+        # Note: lengths of b0 and b1: 4
+        # Computing state and control trajectories from flat outputs
+        dt = 0.01;
+        t = np.arange(0, T+0.01, dt);
+        # First, we compute x, y, and their derivatives; these are analytic since
+        # the basis functions are monomials
+        x = np.zeros(np.size(t))
+        y = np.zeros(np.size(t))
+        # x and y have powers of t from 0 to length(b0)-1
+        for i in range (np.size(b0)):
+            x = x + b0[i] * np.power(t, i)
+            y = y + b1[i] * np.power(t, i)
+        xdot = np.zeros(np.size(t))
+        ydot = np.zeros(np.size(t))
+        # xdot and ydot have powers of t from 0 to length(b0)-2
+        for i in range (np.size(b0)-1):
+            xdot = xdot + (i+1)*b0[i+1]*np.power(t, i)
+            ydot = ydot + (i+1)*b1[i+1]*np.power(t, i)
+
+        xddot = np.zeros(np.size(t))
+        yddot = np.zeros(np.size(t))
+
+        # xddot and yddot have powers of t from 0 to length(b0)-3
+        for i in range (np.size(b0)-2):
+            xddot = xddot + np.math.factorial(i+2)*b0[i+2]*np.power(t, i)
+            yddot = yddot + np.math.factorial(i+2)*b1[i+2]*np.power(t, i)
+
+        # Finally, we have the theta and v trajectories (x and y trajectories have
+        # already been computed)
+        theta = np.arctan2(ydot, xdot)
+        v = np.divide(xdot, np.cos(theta))
+
+        # Use alternate expression for v when cos(theta) == 0
+        # Other option: use v = sqrt(xdot^2 + ydot^2)
+        small = 1e-5;
+        cos_zero_inds = np.absolute(np.cos(theta)) < small
+        v[cos_zero_inds] = np.divide(ydot[cos_zero_inds], np.sin(theta[cos_zero_inds]))
+
+        # Control trajectories
+        omega = np.divide((np.multiply(yddot, xdot) - np.multiply(xddot, ydot)), np.power(v, 2))
+        #a = np.divide((np.multiply(xdot, xddot) + np.multiply(ydot, yddot)), v)
+
+        print (v, omega)
+        print ("time: {}", time.time()-start)
+        return (omega, v, dt)
+
+
+        # ax = plt.subplot(4,1,1)
+        # line, = ax.plot(x, y, 'go-',  markersize=1)
+        #
+        #
+        # plt.subplot(4, 1, 2)
+        # plt.plot(t, omega, 'o-', markersize=1)
+        # plt.title('')
+        # plt.ylabel('omega')
+        #
+        # plt.subplot(4, 1, 3)
+        # plt.plot(t, v, '.-', markersize=1)
+        # plt.xlabel('time (s)')
+        # plt.ylabel('v')
+        #
+        # ax = plt.subplot(4, 1, 4)
+        # ax.plot(t, theta, '.-', label="theta", markersize=1)
+        # ax.plot(t, x, '.-', label="x", markersize=1)
+        # ax.plot(t, y, '.-', label="y", markersize=1)
+        # plt.legend()
+        # plt.xlabel('time (s)')
+        # plt.ylabel('theta')
+        #
+        # plt.show()
+
+
+    def use_dynamics_to_get_to_goal(self):
+        while True:
+            if self.reset:
+                return
+            while self.goal is None:
+                time.sleep(0.1)
+                continue
+            try:
+                omega_list, v_list, dt = self.calculate_using_dynamics(self.goal["v"], self.goal["theta"],self.goal["pos"], 1)
+            except Exception as e:
+                self.node.get_logger().error("exception happend in use_dynamics_to_get_to_goal {}".format(e))
+                continue
+            counter = 0
+            for i in range (len(omega_list)):
+                if self.is_pause:
+                    self.stop_robot()
+                    return
+                if self.reset:
+                    return
+                if counter >= 100:
+                    break
+                omega = abs(omega_list[i])
+                omega = omega % (2*math.pi*10)
+                omega_list[i] = omega if omega_list[i] > 0 else -omega
+                angular_vel = min(max(omega_list[i], -self.max_angular_vel),self.max_angular_vel)
+                percent_max_angular = abs(angular_vel)/self.max_angular_vel
+                v_list[i] = min(v_list[i], 2)
+                percent_max_linear = 1 - percent_max_angular
+                linear_vel = min(max(v_list[i], 0), self.max_linear_vel*percent_max_linear)
+
+                #while percent_max_angular + percnet_max_linear > 1:
+                #    linear_vel *= 0.5
+                #    angular_vel *= 0.95
+                #    percent_max_angular = abs(angular_vel)/self.max_angular_vel
+                #    percnet_max_linear = abs(linear_vel)/self.max_linear_vel
+
+                prev_remaining_linear = v_list[i] - linear_vel
+                prev_remaining_angular = omega_list[i]  - angular_vel
+
+                self.publish_cmd_vel(linear_vel, angular_vel)
+                time.sleep(dt)
+                counter += 1
+                print ("out")
+                while (prev_remaining_linear >= 0.1 or prev_remaining_angular >= 0.1) and counter < 100:
+
+                    counter += 1
+                    angular_vel = min(max(prev_remaining_angular, -self.max_angular_vel),self.max_angular_vel)
+                    percent_max_angular = abs(angular_vel)/self.max_angular_vel
+                    percent_max_linear = 1 - percent_max_angular
+                    linear_vel = min(max(prev_remaining_linear, 0), self.max_linear_vel*percent_max_linear)
+                    prev_remaining_linear = prev_remaining_linear - linear_vel
+                    prev_remaining_angular = prev_remaining_angular  - angular_vel
+
+                    print ("prev_remaining_angular {}  prev_remaining_linear {} ".format(prev_remaining_angular,prev_remaining_linear))
+                    print ("prev_remaining_angular {} {} prev_remaining_linear {} {} {} {}".format(prev_remaining_angular, percent_max_angular, prev_remaining_linear, percent_max_linear, self.max_linear_vel, linear_vel))
+                    self.publish_cmd_vel(linear_vel, angular_vel)
+                    time.sleep(dt)
+
+
 
     def go_to_pos(self, pos, stop_after_getting=False):
         if self.is_pause:
@@ -500,7 +638,11 @@ class Robot():
                 return
             if self.reset:
                 return
-            diff_angle, distance = self.angle_distance_to_point(pos)
+            try:
+                diff_angle, distance = self.angle_distance_to_point(pos)
+            except Exception as e:
+                self.node.get_logger().error("exception happend in go to pos {}".format(e))
+                continue
             if distance is None:
                 return
 
@@ -734,8 +876,10 @@ class GazeboEnv(gym.Env):
 
             pos = states_msg.pose[model_idx]
             robot.state_["position"] = (pos.position.x, pos.position.y)
+            # self.state_["position"] = (pos.position.x + (random.random()-0.5)/5, pos.position.y+ (random.random()-0.5)/5)
             euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
             robot.state_["orientation"] = euler[0]
+            # self.state_["orientation"] = euler[0] + (random.random()-0.5)*math.pi/7
             robot.add_log((pos.position.x, pos.position.y, euler[0]))
         if self.robot_mode == 1:
             self.robot.update_goal(self.person.calculate_ahead(1.5))
@@ -754,8 +898,11 @@ class GazeboEnv(gym.Env):
             # get velocity
             twist = states_msg.twist[model_idx]
             linear_vel = twist.linear.x
-            angular_Vel = twist.angular.z
-            robot.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), robot.manager.get_time_sec())
+            angular_vel = twist.angular.z
+            #linear_vel = twist.linear.x + + (random.random()-0.5)/5
+            #angular_vel = twist.angular.z + (random.random()-0.5)*math.pi/7
+
+            robot.velocity_history.add_element(np.asanyarray((linear_vel, angular_vel)), robot.manager.get_time_sec())
 
     def add_observation_to_image(self, pos, color, radious):
         to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*25.+250), int((x[1] - self.center_pos_[1])*25.+250))
@@ -899,7 +1046,7 @@ class GazeboEnv(gym.Env):
             #     person_thread = threading.Thread(target=self.person.go_to_goal, args=())
             #     person_thread.start()
             if self.robot_mode >= 1:
-                self.robot_thread = threading.Thread(target=self.robot.go_to_goal, args=())
+                self.robot_thread = threading.Thread(target=self.robot.use_dynamics_to_get_to_goal, args=())
                 self.robot_thread.start()
 
             for idx in range (idx_start, len(self.path["points"])-3):
@@ -1182,89 +1329,6 @@ class GazeboEnv(gym.Env):
 
         return self.get_observation()
 
-    def calculate_using_dynamics(self, v_start, v_end, theta_start, theta_end, pos_start, pos_end):
-        x_dot_start = v_start * math.cos(theta_start) 
-        x_dot_end = v_end * math.cos(theta_end) 
-        y_dot_start = v_start * math.sin(theta_start) 
-        y_dot_end = v_end * math.sin(theta_end) 
-        start = time.time()
-        T = 1
-        M = np.asarray([[1, 0, 0, 0], [0, 1, 0, 0],[1, T, T**2, T**3], [0, 1, 2*T, 3*T**2]])
-        
-        # RHS of constraints in flat output space
-        x_constr = np.asarray([[pos_start[0]], [x_dot_start], [pos_end[0]], [x_dot_end]])
-        y_constr = np.asarray([[pos_start[1]], [y_dot_start], [pos_end[1]], [y_dot_end]])
-        
-        # Solve for coefficients of basis functions
-        b0 = np.linalg.solve(M, x_constr)
-        b1 = np.linalg.solve(M, y_constr)
-        # Note: lengths of b0 and b1: 4
-        # Computing state and control trajectories from flat outputs
-        dt = 0.01;
-        t = np.arange(0, T+0.01, dt);
-        print (t)
-        # First, we compute x, y, and their derivatives; these are analytic since
-        # the basis functions are monomials
-        x = np.zeros(np.size(t))
-        y = np.zeros(np.size(t))
-        # x and y have powers of t from 0 to length(b0)-1
-        for i in range (np.size(b0)):
-            x = x + b0[i] * np.power(t, i)
-            y = y + b1[i] * np.power(t, i)
-        xdot = np.zeros(np.size(t))
-        ydot = np.zeros(np.size(t))
-        # xdot and ydot have powers of t from 0 to length(b0)-2
-        for i in range (np.size(b0)-1):
-            xdot = xdot + (i+1)*b0[i+1]*np.power(t, i)
-            ydot = ydot + (i+1)*b1[i+1]*np.power(t, i)
-        
-        xddot = np.zeros(np.size(t))
-        yddot = np.zeros(np.size(t))
-        
-        # xddot and yddot have powers of t from 0 to length(b0)-3
-        for i in range (np.size(b0)-2):
-            xddot = xddot + np.math.factorial(i+2)*b0[i+2]*np.power(t, i)
-            yddot = yddot + np.math.factorial(i+2)*b1[i+2]*np.power(t, i)
-         
-        # Finally, we have the theta and v trajectories (x and y trajectories have
-        # already been computed)
-        theta = np.arctan2(ydot, xdot)
-        v = np.divide(xdot, np.cos(theta))
-        
-        # Use alternate expression for v when cos(theta) == 0
-        # Other option: use v = sqrt(xdot^2 + ydot^2)
-        small = 1e-5;
-        cos_zero_inds = np.absolute(np.cos(theta)) < small
-        v[cos_zero_inds] = np.divide(ydot[cos_zero_inds], np.sin(theta[cos_zero_inds]))
-         
-        # Control trajectories
-        omega = np.divide((np.multiply(yddot, xdot) - np.multiply(xddot, ydot)), np.power(v, 2))
-        a = np.divide((np.multiply(xdot, xddot) + np.multiply(ydot, yddot)), v)
-        print ("time: {}", time.time()-start)
-        
-        # ax = plt.subplot(4,1,1) 
-        # line, = ax.plot(x, y, 'go-',  markersize=1)
-        # 
-        # 
-        # plt.subplot(4, 1, 2)
-        # plt.plot(t, omega, 'o-', markersize=1)
-        # plt.title('')
-        # plt.ylabel('omega')
-        # 
-        # plt.subplot(4, 1, 3)
-        # plt.plot(t, v, '.-', markersize=1)
-        # plt.xlabel('time (s)')
-        # plt.ylabel('v')
-        # 
-        # ax = plt.subplot(4, 1, 4)
-        # ax.plot(t, theta, '.-', label="theta", markersize=1)
-        # ax.plot(t, x, '.-', label="x", markersize=1)
-        # ax.plot(t, y, '.-', label="y", markersize=1)
-        # plt.legend()
-        # plt.xlabel('time (s)')
-        # plt.ylabel('theta')
-        # 
-        # plt.show()
 
     def reset(self, reset_gazebo=False):
 
@@ -1339,10 +1403,15 @@ def test_env():
     gazebo.set_robot_to_auto()
     print("done reset")
     gazebo.resume_simulator()
+    not_init = True
     while True:
         time.sleep(0.001)
-        gazebo.take_supervised_action()
+        if gazebo.person.is_current_state_ready() and not_init:
+            goal = gazebo.person.calculate_ahead(1)
+            gazebo.robot.update_goal(0, math.pi, goal)
+            not_init = False
+        #gazebo.take_supervised_action()
 
 
 
-#test_env()
+test_env()
