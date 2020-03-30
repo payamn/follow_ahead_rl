@@ -1202,6 +1202,90 @@ class GazeboEnv(gym.Env):
 
         return self.get_observation()
 
+    def calculate_using_dynamics(self, v_start, v_end, theta_start, theta_end, pos_start, pos_end):
+        x_dot_start = v_start * math.cos(theta_start) 
+        x_dot_end = v_end * math.cos(theta_end) 
+        y_dot_start = v_start * math.sin(theta_start) 
+        y_dot_end = v_end * math.sin(theta_end) 
+        start = time.time()
+        T = 1
+        M = np.asarray([[1, 0, 0, 0], [0, 1, 0, 0],[1, T, T**2, T**3], [0, 1, 2*T, 3*T**2]])
+        
+        # RHS of constraints in flat output space
+        x_constr = np.asarray([[pos_start[0]], [x_dot_start], [pos_end[0]], [x_dot_end]])
+        y_constr = np.asarray([[pos_start[1]], [y_dot_start], [pos_end[1]], [y_dot_end]])
+        
+        # Solve for coefficients of basis functions
+        b0 = np.linalg.solve(M, x_constr)
+        b1 = np.linalg.solve(M, y_constr)
+        # Note: lengths of b0 and b1: 4
+        # Computing state and control trajectories from flat outputs
+        dt = 0.01;
+        t = np.arange(0, T+0.01, dt);
+        print (t)
+        # First, we compute x, y, and their derivatives; these are analytic since
+        # the basis functions are monomials
+        x = np.zeros(np.size(t))
+        y = np.zeros(np.size(t))
+        # x and y have powers of t from 0 to length(b0)-1
+        for i in range (np.size(b0)):
+            x = x + b0[i] * np.power(t, i)
+            y = y + b1[i] * np.power(t, i)
+        xdot = np.zeros(np.size(t))
+        ydot = np.zeros(np.size(t))
+        # xdot and ydot have powers of t from 0 to length(b0)-2
+        for i in range (np.size(b0)-1):
+            xdot = xdot + (i+1)*b0[i+1]*np.power(t, i)
+            ydot = ydot + (i+1)*b1[i+1]*np.power(t, i)
+        
+        xddot = np.zeros(np.size(t))
+        yddot = np.zeros(np.size(t))
+        
+        # xddot and yddot have powers of t from 0 to length(b0)-3
+        for i in range (np.size(b0)-2):
+            xddot = xddot + np.math.factorial(i+2)*b0[i+2]*np.power(t, i)
+            yddot = yddot + np.math.factorial(i+2)*b1[i+2]*np.power(t, i)
+         
+        # Finally, we have the theta and v trajectories (x and y trajectories have
+        # already been computed)
+        theta = np.arctan2(ydot, xdot)
+        v = np.divide(xdot, np.cos(theta))
+        
+        # Use alternate expression for v when cos(theta) == 0
+        # Other option: use v = sqrt(xdot^2 + ydot^2)
+        small = 1e-5;
+        cos_zero_inds = np.absolute(np.cos(theta)) < small
+        v[cos_zero_inds] = np.divide(ydot[cos_zero_inds], np.sin(theta[cos_zero_inds]))
+         
+        # Control trajectories
+        omega = np.divide((np.multiply(yddot, xdot) - np.multiply(xddot, ydot)), np.power(v, 2))
+        a = np.divide((np.multiply(xdot, xddot) + np.multiply(ydot, yddot)), v)
+        print ("time: {}", time.time()-start)
+        
+        # ax = plt.subplot(4,1,1) 
+        # line, = ax.plot(x, y, 'go-',  markersize=1)
+        # 
+        # 
+        # plt.subplot(4, 1, 2)
+        # plt.plot(t, omega, 'o-', markersize=1)
+        # plt.title('')
+        # plt.ylabel('omega')
+        # 
+        # plt.subplot(4, 1, 3)
+        # plt.plot(t, v, '.-', markersize=1)
+        # plt.xlabel('time (s)')
+        # plt.ylabel('v')
+        # 
+        # ax = plt.subplot(4, 1, 4)
+        # ax.plot(t, theta, '.-', label="theta", markersize=1)
+        # ax.plot(t, x, '.-', label="x", markersize=1)
+        # ax.plot(t, y, '.-', label="y", markersize=1)
+        # plt.legend()
+        # plt.xlabel('time (s)')
+        # plt.ylabel('theta')
+        # 
+        # plt.show()
+
     def reset(self, reset_gazebo=False):
 
         if self.is_reseting:
