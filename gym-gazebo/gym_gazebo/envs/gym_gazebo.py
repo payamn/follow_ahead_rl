@@ -292,6 +292,7 @@ class Robot():
         self.scan_image_history = History(5, 5, 1, self.manager)
         self.log_history = []
         self.is_collided = False
+        self.stop_robot()
         self.is_pause = False
         self.reset = False
 
@@ -541,6 +542,20 @@ class Robot():
 
         return self.state_['position']
 
+    def get_orientation(self):
+        counter_problem = 0
+        while self.state_['orientation'] is None:
+            if self.reset:
+                return (None, None)
+            if counter_problem > 20:
+                self.node.get_logger().debug("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
+            time.sleep(0.001)
+            counter_problem += 1
+            if counter_problem > 200:
+                raise Exception('Probable shared memory issue happend')
+
+        return self.state_['orientation']
+
     def get_laser_image(self):
         while self.scan_image is None:
             time.sleep(0.1)
@@ -777,7 +792,25 @@ class GazeboEnv(gym.Env):
             angular_Vel = twist.angular.z
             robot.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), robot.manager.get_time_sec())
 
-    def add_observation_to_image(self, pos, color, radious):
+    def add_line_observation_to_image(self, pos, pos2, color):
+        to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
+        pos_image = to_image_fun(pos)
+        pos_image2 = to_image_fun(pos2)
+        if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
+            self.node.get_logger().error("problem with observation: {}".format(pos_image))
+            return
+        self.current_obsevation_image_ = cv.line(self.current_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 1)
+
+    def add_arrow_observation_to_image(self, pos, orientation, color):
+        to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
+        pos_image = to_image_fun(pos)
+        pos_image2 = to_image_fun((pos[0]+math.cos(orientation)*0.5, pos[1]+math.sin(orientation)*0.5))
+        if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
+            self.node.get_logger().error("problem with observation: {}".format(pos_image))
+            return
+        self.current_obsevation_image_ = cv.arrowedLine(self.current_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 3)
+
+    def add_circle_observation_to_image(self, pos, color, radious):
         to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
         pos_image = to_image_fun(pos)
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
@@ -795,11 +828,14 @@ class GazeboEnv(gym.Env):
 
     def update_observation_image(self):
         robot_pos = self.robot.get_pos()
+        robot_orientation = self.robot.get_orientation()
         person_pos = self.person.get_pos()
+        person_orientation = self.person.get_orientation()
         current_goal = self.robot.goal
-        self.add_observation_to_image(robot_pos, self.robot_color, 2)
-        self.add_observation_to_image(person_pos, self.person_color, 2)
-        self.add_observation_to_image(current_goal, self.goal_color, 2)
+        self.add_arrow_observation_to_image(robot_pos, robot_orientation, self.robot_color)
+        self.add_arrow_observation_to_image(person_pos, person_orientation, self.person_color)
+        self.add_circle_observation_to_image(current_goal, self.goal_color, 2)
+        self.add_line_observation_to_image(robot_pos, current_goal, self.person_color)
         self.darken_all_colors()
 
 
@@ -1203,18 +1239,18 @@ class GazeboEnv(gym.Env):
         return self.get_observation()
 
     def calculate_using_dynamics(self, v_start, v_end, theta_start, theta_end, pos_start, pos_end):
-        x_dot_start = v_start * math.cos(theta_start) 
-        x_dot_end = v_end * math.cos(theta_end) 
-        y_dot_start = v_start * math.sin(theta_start) 
-        y_dot_end = v_end * math.sin(theta_end) 
+        x_dot_start = v_start * math.cos(theta_start)
+        x_dot_end = v_end * math.cos(theta_end)
+        y_dot_start = v_start * math.sin(theta_start)
+        y_dot_end = v_end * math.sin(theta_end)
         start = time.time()
         T = 1
         M = np.asarray([[1, 0, 0, 0], [0, 1, 0, 0],[1, T, T**2, T**3], [0, 1, 2*T, 3*T**2]])
-        
+
         # RHS of constraints in flat output space
         x_constr = np.asarray([[pos_start[0]], [x_dot_start], [pos_end[0]], [x_dot_end]])
         y_constr = np.asarray([[pos_start[1]], [y_dot_start], [pos_end[1]], [y_dot_end]])
-        
+
         # Solve for coefficients of basis functions
         b0 = np.linalg.solve(M, x_constr)
         b1 = np.linalg.solve(M, y_constr)
@@ -1237,45 +1273,45 @@ class GazeboEnv(gym.Env):
         for i in range (np.size(b0)-1):
             xdot = xdot + (i+1)*b0[i+1]*np.power(t, i)
             ydot = ydot + (i+1)*b1[i+1]*np.power(t, i)
-        
+
         xddot = np.zeros(np.size(t))
         yddot = np.zeros(np.size(t))
-        
+
         # xddot and yddot have powers of t from 0 to length(b0)-3
         for i in range (np.size(b0)-2):
             xddot = xddot + np.math.factorial(i+2)*b0[i+2]*np.power(t, i)
             yddot = yddot + np.math.factorial(i+2)*b1[i+2]*np.power(t, i)
-         
+
         # Finally, we have the theta and v trajectories (x and y trajectories have
         # already been computed)
         theta = np.arctan2(ydot, xdot)
         v = np.divide(xdot, np.cos(theta))
-        
+
         # Use alternate expression for v when cos(theta) == 0
         # Other option: use v = sqrt(xdot^2 + ydot^2)
         small = 1e-5;
         cos_zero_inds = np.absolute(np.cos(theta)) < small
         v[cos_zero_inds] = np.divide(ydot[cos_zero_inds], np.sin(theta[cos_zero_inds]))
-         
+
         # Control trajectories
         omega = np.divide((np.multiply(yddot, xdot) - np.multiply(xddot, ydot)), np.power(v, 2))
         a = np.divide((np.multiply(xdot, xddot) + np.multiply(ydot, yddot)), v)
         print ("time: {}", time.time()-start)
-        
-        # ax = plt.subplot(4,1,1) 
+
+        # ax = plt.subplot(4,1,1)
         # line, = ax.plot(x, y, 'go-',  markersize=1)
-        # 
-        # 
+        #
+        #
         # plt.subplot(4, 1, 2)
         # plt.plot(t, omega, 'o-', markersize=1)
         # plt.title('')
         # plt.ylabel('omega')
-        # 
+        #
         # plt.subplot(4, 1, 3)
         # plt.plot(t, v, '.-', markersize=1)
         # plt.xlabel('time (s)')
         # plt.ylabel('v')
-        # 
+        #
         # ax = plt.subplot(4, 1, 4)
         # ax.plot(t, theta, '.-', label="theta", markersize=1)
         # ax.plot(t, x, '.-', label="x", markersize=1)
@@ -1283,7 +1319,7 @@ class GazeboEnv(gym.Env):
         # plt.legend()
         # plt.xlabel('time (s)')
         # plt.ylabel('theta')
-        # 
+        #
         # plt.show()
 
     def reset(self, reset_gazebo=False):
@@ -1360,8 +1396,13 @@ def test_env():
     print("done reset")
     gazebo.resume_simulator()
     while True:
-        time.sleep(0.001)
-        gazebo.take_supervised_action()
+        time.sleep(1)
+        #gazebo.take_supervised_action()
+        gazebo.take_action((-0.2,0.1))
+        gazebo.update_observation_image()
+        img = gazebo.get_current_observation_image()
+        cv.imshow("s", img)
+        cv.waitKey(0)
 
 
 
