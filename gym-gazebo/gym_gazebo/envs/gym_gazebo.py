@@ -248,8 +248,8 @@ class Robot():
 
         self.cmd_vel_pub = self.node.create_publisher(Twist, '/{}/cmd_vel'.format(name))
         #self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, qos_profile=qosProfileSensors)
-        self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
-        self.linear_pid = PID(1.5, 0, 0.06, setpoint=0)
+        self.angular_pid = PID(2.5, 0, 0.03, setpoint=0)
+        self.linear_pid = PID(2.5, 0, 0.06, setpoint=0)
         self.relative_pos_history = History(200, 10, 2, manager)
         self.relative_orientation_history = History(200, 10, 2, manager)
         self.velocity_history = History(200, 10, 2, manager)
@@ -282,8 +282,8 @@ class Robot():
         self.alive = True
         self.state_ = {'position': (None, None),
                        'orientation': pos_angle["orientation"]}
-        self.angular_pid = PID(0.1, 0, 0.03, setpoint=0)
-        self.linear_pid = PID(1.5, 0, 0.06, setpoint=0)
+        self.angular_pid = PID(2.5, 0, 0.03, setpoint=0)
+        self.linear_pid = PID(2.5, 0, 0.06, setpoint=0)
         self.relative_pos_history = History(200, 10, 2, self.manager)
         self.relative_orientation_history = History(200, 10, 2, self.manager)
         self.velocity_history = History(200, 10, 2, self.manager)
@@ -485,7 +485,7 @@ class Robot():
                 if self.reset:
                     return
 
-                angular_vel = -min(max(self.angular_pid(diff_angle)*10, -self.max_angular_vel),self.max_angular_vel)
+                angular_vel = -min(max(self.angular_pid(diff_angle), -self.max_angular_vel),self.max_angular_vel)
                 linear_vel = min(max(self.linear_pid(-distance), 0), self.max_linear_vel)
                 linear_vel = linear_vel * math.pow((abs(math.pi - abs(diff_angle))/math.pi), 2)
 
@@ -518,7 +518,7 @@ class Robot():
             if self.reset:
                 return
 
-            angular_vel = -min(max(self.angular_pid(diff_angle)*10, -self.max_angular_vel),self.max_angular_vel)
+            angular_vel = -min(max(self.angular_pid(diff_angle), -self.max_angular_vel),self.max_angular_vel)
             linear_vel = min(max(self.linear_pid(-distance), 0), self.max_linear_vel)
             linear_vel = linear_vel * math.pow((abs(math.pi - abs(diff_angle))/math.pi), 2)
 
@@ -570,9 +570,11 @@ class GazeboEnv(gym.Env):
         self.wait_counter_ = 0
 
         # curriculam param
-        self.max_mod_person_ = 0
+        self.max_mod_person_ = 7
         self.use_random_around_person_ = True
         self.robot_thread = None
+
+        self.wait_observation_ = 0
 
         # being use for observation visualization
         self.center_pos_ = (0, 0)
@@ -604,7 +606,7 @@ class GazeboEnv(gym.Env):
         if self.test_simulation_ or self.is_evaluation_:
            self.max_numb_steps = 1000000000000000000
         else:
-            self.max_numb_steps = 400
+            self.max_numb_steps = 100
         self.reward_range = [-1, 1]
         self.manager = None
 
@@ -675,9 +677,8 @@ class GazeboEnv(gym.Env):
             init_pos_robot = self.path["start_robot"]
         elif self.use_random_around_person_:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
-            init_pos_robot = {"pos": self.find_random_point_in_circle(3, 1, self.path["points"][idx_start]),\
-                              "orientation": self.calculate_angle_using_path(idx_start)}
-                              #random.random()*2*math.pi - math.pi}
+            init_pos_robot = {"pos": self.find_random_point_in_circle(1.5, 1, self.path["points"][idx_start]),\
+                              "orientation": random.random()*2*math.pi - math.pi}#self.calculate_angle_using_path(idx_start)}
         else:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
             idx_robot = idx_start + 1
@@ -726,6 +727,7 @@ class GazeboEnv(gym.Env):
             self.person.update(init_pos_person)
             self.prev_action = (0,0)
 
+        self.wait_observation_ = 0
         self.robot_color = [255,0,0]
         self.person_color = [0,0,255]
         self.goal_color = [0,255,0]
@@ -746,7 +748,7 @@ class GazeboEnv(gym.Env):
 
     def states_cb(self, states_msg):
 
-        if self.state_cb_prev_time is None or self.manager.get_time_sec() - self.state_cb_prev_time < 0.05:
+        if self.state_cb_prev_time is None or self.manager.get_time_sec() - self.state_cb_prev_time < 0.01:
             if self.state_cb_prev_time is None:
                 self.state_cb_prev_time = self.manager.get_time_sec()
             return
@@ -799,16 +801,16 @@ class GazeboEnv(gym.Env):
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             self.node.get_logger().error("problem with observation: {}".format(pos_image))
             return
-        self.current_obsevation_image_ = cv.line(self.current_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 1)
+        self.new_obsevation_image_ = cv.line(self.new_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 1)
 
     def add_arrow_observation_to_image(self, pos, orientation, color):
         to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
         pos_image = to_image_fun(pos)
-        pos_image2 = to_image_fun((pos[0]+math.cos(orientation)*0.5, pos[1]+math.sin(orientation)*0.5))
+        pos_image2 = to_image_fun((pos[0]+math.cos(orientation), pos[1]+math.sin(orientation)))
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             self.node.get_logger().error("problem with observation: {}".format(pos_image))
             return
-        self.current_obsevation_image_ = cv.arrowedLine(self.current_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 3)
+        self.new_obsevation_image_ = cv.arrowedLine(self.new_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 3)
 
     def add_circle_observation_to_image(self, pos, color, radious):
         to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
@@ -816,10 +818,10 @@ class GazeboEnv(gym.Env):
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             self.node.get_logger().error("problem with observation: {}".format(pos_image))
             return
-        self.current_obsevation_image_ = cv.circle(self.current_obsevation_image_, (pos_image[0], pos_image[1]), radious, color, -1)
+        self.new_obsevation_image_ = cv.circle(self.new_obsevation_image_, (pos_image[0], pos_image[1]), radious, color, -1)
 
     def darken_all_colors(self):
-        darken_fun = lambda x: [max(y-1, 10) for y in x]
+        darken_fun = lambda x: [max(y-1, 100) for y in x]
         self.robot_color = darken_fun(self.robot_color)
         self.person_color = darken_fun(self.person_color)
         self.goal_color = darken_fun(self.goal_color)
@@ -827,6 +829,7 @@ class GazeboEnv(gym.Env):
 
 
     def update_observation_image(self):
+        self.new_obsevation_image_ = np.copy(self.current_obsevation_image_)
         robot_pos = self.robot.get_pos()
         robot_orientation = self.robot.get_orientation()
         person_pos = self.person.get_pos()
@@ -834,9 +837,11 @@ class GazeboEnv(gym.Env):
         current_goal = self.robot.goal
         self.add_arrow_observation_to_image(robot_pos, robot_orientation, self.robot_color)
         self.add_arrow_observation_to_image(person_pos, person_orientation, self.person_color)
-        self.add_circle_observation_to_image(current_goal, self.goal_color, 2)
+        self.add_circle_observation_to_image(current_goal, self.goal_color, 5)
         self.add_line_observation_to_image(robot_pos, current_goal, self.person_color)
-        self.darken_all_colors()
+        alpha = 0.50
+        self.current_obsevation_image_ = cv.addWeighted(self.new_obsevation_image_, alpha, self.current_obsevation_image_, 1 - alpha, 0)
+        #self.darken_all_colors()
 
 
     def get_current_observation_image(self):
@@ -1057,6 +1062,8 @@ class GazeboEnv(gym.Env):
             self.node.get_logger().debug("waiting to get pos/vel pos: {} vel: {} vel_person: {}".format(self.robot.relative_pos_history.avg_frame_rate ,self.robot.velocity_history.avg_frame_rate, self.person.velocity_history.avg_frame_rate))
         pose_history = np.asarray(self.robot.relative_pos_history.get_elemets()).flatten()/5.0
         heading_history = np.asarray(self.robot.relative_orientation_history.get_elemets())/math.pi
+        if random.random() < 0.7:
+            heading_history = np.zeros(heading_history.shape)
         # self.visualize_observation(poses, headings, self.get_laser_scan())
         orientation_position = np.append(pose_history, heading_history)
         velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))
@@ -1084,8 +1091,11 @@ class GazeboEnv(gym.Env):
     def take_action(self, action):
         if self.test_simulation_:
             return
-        self.robot.take_action(action, self.person)
-        self.update_observation_image()
+        self.robot.take_action(action, self.robot)
+        if self.wait_observation_ <= 0:
+            self.update_observation_image()
+            self.wait_observation_ = 5
+        self.wait_observation_ -= 1
         return
 
 
@@ -1114,7 +1124,7 @@ class GazeboEnv(gym.Env):
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
-        time.sleep(0.08)
+        time.sleep(0.1)
         reward = self.get_reward(action)
         ob = self.get_observation()
         episode_over = False
@@ -1203,7 +1213,7 @@ class GazeboEnv(gym.Env):
             if self.is_collided():
                 reward -= 1
             if distance < 0.3:
-                reward -= -1
+                reward -= 1
             elif abs(distance - 1.7) < 0.7:
                 reward += 0.1 * (0.7 - abs(distance - 1.7))
             elif distance >= 1.7:
