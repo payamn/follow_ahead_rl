@@ -1,7 +1,7 @@
 # Environment parameters
 
 env: gazebo-v0
-state_dim: 72
+state_dim: 26
 action_dim: 2
 action_low: -1
 action_high: 1
@@ -36,10 +36,10 @@ device: cuda
 
 critic_learning_rate: 0.002
 actor_learning_rate: 0.002
-dense_size: 2024 # size of the 2 hidden layers in networks
+dense_size: 512 # size of the 2 hidden layers in networks
 final_layer_init: 0.004
 num_atoms: 1024 # number of atoms in output layer of distributed critic
-v_min: -400.0 # lower bound of critic value output distribution
+v_min: -40.0 # lower bound of critic value output distribution
 v_max: 0.0 # upper bound of critic value output distribution
 tau: 0.002 # parameter for soft target network updates
 

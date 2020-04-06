@@ -174,7 +174,7 @@ class History():
         self.manager = manager
         self.update_rate = rate
         self.lock = _thread.allocate_lock()
-        self.memory_size = memory_size
+        self.memory_size = max(memory_size, 25)
         self.window_size = window_size
         self.avg_frame_rate = None
         self.time_data_= []
@@ -191,12 +191,12 @@ class History():
                 for idx in range(self.memory_size):
                     self.data[idx] = element
             self.data[self.idx] = element
-            if not len(self.time_data_) > 50:
+            if not len(self.time_data_) > self.memory_size / 2:
                 self.time_data_.append(time_data)
-                if len(self.time_data_) > 3:
+                if len(self.time_data_) > 20:
                     prev_t = self.time_data_[0]
                     time_intervals = []
-                    for t in self.time_data_[1:]:
+                    for t in self.time_data_[10:]:
                         time_intervals.append(t - prev_t)
                         prev_t = t
                     self.avg_frame_rate = 1.0 / np.average(time_intervals)
@@ -225,6 +225,7 @@ class Robot():
     def __init__(self, name, init_pos, manager, node, max_angular_speed=1, max_linear_speed=1, relative=None, action_mode="pos"):
         # manager.create_robot(name, name, init_pos, angle)
         manager.move_robot(name, name, init_pos)
+        self.update_rate_states = 5 # hz
         self.name = name
         self.manager = manager
         self.init_node = False
@@ -250,11 +251,11 @@ class Robot():
         #self.laser_sub = self.node.create_subscription(LaserScan, '/{}/scan'.format(name), self.laser_cb, qos_profile=qosProfileSensors)
         self.angular_pid = PID(2.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(2.5, 0, 0.06, setpoint=0)
-        self.relative_pos_history = History(200, 10, 2, manager)
-        self.relative_orientation_history = History(200, 10, 2, manager)
-        self.velocity_history = History(200, 10, 2, manager)
+        self.pos_history = History(200, 10, self.update_rate_states, manager)
+        self.orientation_history = History(200, 10, self.update_rate_states, manager)
+        self.velocity_history = History(200, 10, self.update_rate_states, manager)
         self.scan_image = None
-       # self.scan_image_history = History(5, 1, manager)
+       # self.scan_image_history = History(5, self.update_rate_states, manager)
         self.is_collided = False
         self.is_pause = False
         self.reset = False
@@ -271,8 +272,8 @@ class Robot():
         return (self.state_['position'][0] is not None)
 
     def is_observation_ready(self):
-        return (self.relative_pos_history.avg_frame_rate is not None and\
-                self.relative_orientation_history.avg_frame_rate is not None and\
+        return (self.pos_history.avg_frame_rate is not None and\
+                self.orientation_history.avg_frame_rate is not None and\
                 self.velocity_history.avg_frame_rate is not None)
 
     def update(self, pos_angle):
@@ -284,12 +285,12 @@ class Robot():
                        'orientation': pos_angle["orientation"]}
         self.angular_pid = PID(2.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(2.5, 0, 0.06, setpoint=0)
-        self.relative_pos_history = History(200, 10, 2, self.manager)
-        self.relative_orientation_history = History(200, 10, 2, self.manager)
-        self.velocity_history = History(200, 10, 2, self.manager)
+        self.pos_history = History(200, 10, self.update_rate_states, self.manager)
+        self.orientation_history = History(200, 10, self.update_rate_states, self.manager)
+        self.velocity_history = History(200, 10, self.update_rate_states, self.manager)
         self.velocity_history.add_element((0,0), self.manager.get_time_sec())
         self.scan_image = None
-        self.scan_image_history = History(5, 5, 1, self.manager)
+        #self.scan_image_history = History(5, 5, self.update_rate_states, self.manager)
         self.log_history = []
         self.is_collided = False
         self.stop_robot()
@@ -310,41 +311,6 @@ class Robot():
         # self.laser_sub.destroy()
         # self.model_states_sub.destroy()
         self.reset = True
-
-    def states_cb(self, states_msg):
-        model_idx = None
-        prev_pos = self.state_["position"]
-        for i in range(len(states_msg.name)):
-            if states_msg.name[i] == self.name:
-                # self.node.get_logger().warn("statecb")
-                model_idx = i
-                break
-        if model_idx is None:
-            print("cannot find {}".format(self.name))
-            return
-
-        pos = states_msg.pose[model_idx]
-        self.state_["position"] = (pos.position.x + (random.random()-0.5)/5, pos.position.y+ (random.random()-0.5)/5)
-        euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
-        self.state_["orientation"] = euler[0] + (random.random()-0.5)*math.pi/7
-
-        if self.relative is not None and not self.relative.reset:
-            self.manager.node.get_logger().debug('before calling get rel in state cb {}'.format(self.state_))
-            orientation_rel, position_rel = GazeboEnv.get_relative_heading_position(self, self.relative, self.manager.node)
-            self.manager.node.get_logger().debug('after calling get rel in state cb ')
-            if orientation_rel is None or position_rel is None:
-                self.manager.node.get_logger().error('orientation or pos is none')
-            else:
-                self.manager.node.get_logger().debug("after state cb")
-                self.relative_orientation_history.add_element(orientation_rel, self.manager.get_time_sec())
-                self.relative_pos_history.add_element(position_rel, self.manager.get_time_sec())
-
-        # get velocity
-        twist = states_msg.twist[model_idx]
-        linear_vel = twist.linear.x + + (random.random()-0.5)/5
-        angular_Vel = twist.angular.z + (random.random()-0.5)*math.pi/7
-
-        self.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), self.manager.get_time_sec())
 
     def laser_cb(self, laser_msg):
 
@@ -372,7 +338,7 @@ class Robot():
         self.scan_image = scan_image
 
     def get_velocity(self):
-        return self.velocity_history.get_elemets()
+        return self.velocity_history.get_latest()
 
     def pause(self):
         self.is_pause = True
@@ -452,7 +418,7 @@ class Robot():
                 linear_vel = self.max_linear_vel/4
                 angular_vel = self.max_angular_vel
             elif person_mode == 6:
-                linear_vel, angular_vel = self.get_velocity()[0]
+                linear_vel, angular_vel = self.get_velocity()
                 linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
                 angular_vel = angular_vel - (angular_vel - (random.random()-0.5)*2)/2.
             elif person_mode == 7:
@@ -590,7 +556,7 @@ class GazeboEnv(gym.Env):
         self.current_obsevation_image_ = np.zeros([2000,2000,3])
         self.current_obsevation_image_.fill(255)
 
-        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(72,))
+        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(26,))
         # gym.spaces.Tuple(
         #     (
         #         gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
@@ -774,19 +740,21 @@ class GazeboEnv(gym.Env):
             euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
             robot.state_["orientation"] = euler[0]
             robot.add_log((pos.position.x, pos.position.y, euler[0]))
+            robot.pos_history.add_element((pos.position.x, pos.position.y), self.manager.get_time_sec())
+            robot.orientation_history.add_element(euler[0], self.manager.get_time_sec())
         if self.robot_mode == 1:
             self.robot.update_goal(self.person.calculate_ahead(1.5))
         #else:
         #    self.take_supervised_action()
         for robot in (self.robot, self.person):
-            if robot.relative is not None and not robot.relative.reset:
-                orientation_rel, position_rel = GazeboEnv.get_relative_heading_position(robot, robot.relative, robot.manager.node)
-                if orientation_rel is None or position_rel is None:
-                    robot.manager.node.get_logger().debug('orientation or pos is none')
-                else:
-                    self.node.get_logger().debug("agent: {} pos_rel: {:2.2f} {:2.2f}, orientation: {:2.2f}".format(self.agent_num, position_rel[0], position_rel[1], np.rad2deg(orientation_rel)))
-                    robot.relative_orientation_history.add_element(orientation_rel, robot.manager.get_time_sec())
-                    robot.relative_pos_history.add_element(position_rel, robot.manager.get_time_sec())
+            # if robot.relative is not None and not robot.relative.reset:
+            #     orientation_rel, position_rel = GazeboEnv.get_relative_heading_position(robot, robot.relative, robot.manager.node)
+            #     if orientation_rel is None or position_rel is None:
+            #         robot.manager.node.get_logger().debug('orientation or pos is none')
+            #     else:
+            #         self.node.get_logger().debug("agent: {} pos_rel: {:2.2f} {:2.2f}, orientation: {:2.2f}".format(self.agent_num, position_rel[0], position_rel[1], np.rad2deg(orientation_rel)))
+            #         robot.relative_orientation_history.add_element(orientation_rel, robot.manager.get_time_sec())
+            #         robot.relative_pos_history.add_element(position_rel, robot.manager.get_time_sec())
 
             # get velocity
             twist = states_msg.twist[model_idx]
@@ -1055,20 +1023,26 @@ class GazeboEnv(gym.Env):
         #     except Exception as e:
         #         self.node.get_logger().error("laser_error reseting")
         #         # self.reset(reset_gazebo = True)
-        while self.robot.relative_pos_history.avg_frame_rate is None or self.robot.velocity_history.avg_frame_rate is None or self.person.velocity_history.avg_frame_rate is None:
+        while self.robot.pos_history.avg_frame_rate is None or self.robot.velocity_history.avg_frame_rate is None or self.person.velocity_history.avg_frame_rate is None:
+            #self.node.get_logger().info("waiting to get_observation {} {} {}".format(self.robot.pos_history.avg_frame_rate, self.robot.velocity_history.avg_frame_rate, self.person.velocity_history.avg_frame_rate))
             if self.is_reseting:
                 return None
             time.sleep(0.001)
-            self.node.get_logger().debug("waiting to get pos/vel pos: {} vel: {} vel_person: {}".format(self.robot.relative_pos_history.avg_frame_rate ,self.robot.velocity_history.avg_frame_rate, self.person.velocity_history.avg_frame_rate))
-        pose_history = np.asarray(self.robot.relative_pos_history.get_elemets()).flatten()/5.0
-        heading_history = np.asarray(self.robot.relative_orientation_history.get_elemets())/math.pi
-        if random.random() < 0.7:
-            heading_history = np.zeros(heading_history.shape)
+        pos_his = self.robot.pos_history.get_elemets()
+        pos_rel = []
+        for pos in pos_his:
+            relative = GazeboEnv.get_relative_position(pos, self.person, self.node)
+            pos_rel.append(relative)
+        pos_history = np.asarray(np.asarray(pos_rel)).flatten()/5.0
+        #heading_history = np.asarray(self.robot.get_relative_orientation())/math.pi
         # self.visualize_observation(poses, headings, self.get_laser_scan())
-        orientation_position = np.append(pose_history, heading_history)
+        #orientation_position = np.append(pose_history, heading_history)
         velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))
         #self.node.get_logger().info("velociy min: {} max: {} rate_vel: {} avg: {} clock {} vel {}".format(np.min(velocities), np.max(velocities), self.person.velocity_history.avg_frame_rate, self.person.velocity_history.update_rate, self.manager.get_time_sec(), self.person.get_velocity()))
-        return np.append(np.append(orientation_position, velocities), self.prev_action)
+        final_ob =  np.append(np.append(pos_history, velocities), self.prev_action)
+
+        #self.node.get_logger().info("{}{} {}".format(final_ob.shape, velocities.shape, pos_history.shape))
+        return final_ob
 
 
     def reset_gazebo(self, no_manager=False):
