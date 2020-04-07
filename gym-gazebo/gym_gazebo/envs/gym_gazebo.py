@@ -368,6 +368,7 @@ class Robot():
             cmd_vel.angular.z = float(angular_vel)
             self.cmd_vel_pub.publish(cmd_vel)
         elif self.action_mode_ == "point":
+            self.node.get_logger().info("action is: {}".format(action))
             pos = GazeboEnv.get_global_position(action, center_object, self.node)
             self.update_goal(pos)
 
@@ -537,7 +538,7 @@ class GazeboEnv(gym.Env):
 
         # curriculam param
         self.max_mod_person_ = 7
-        self.use_random_around_person_ = True
+        self.use_random_around_person_ = False
         self.robot_thread = None
 
         self.wait_observation_ = 0
@@ -552,11 +553,11 @@ class GazeboEnv(gym.Env):
         self.test_simulation_ = False
         self.is_reseting = True
         self.lock = _thread.allocate_lock()
-        self.robot_mode = 1
+        self.robot_mode = 2
         self.current_obsevation_image_ = np.zeros([2000,2000,3])
         self.current_obsevation_image_.fill(255)
 
-        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(26,))
+        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(46,))
         # gym.spaces.Tuple(
         #     (
         #         gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
@@ -743,6 +744,7 @@ class GazeboEnv(gym.Env):
             robot.pos_history.add_element((pos.position.x, pos.position.y), self.manager.get_time_sec())
             robot.orientation_history.add_element(euler[0], self.manager.get_time_sec())
         if self.robot_mode == 1:
+            self.node.get_logger().info("using supervised goal")
             self.robot.update_goal(self.person.calculate_ahead(1.5))
         #else:
         #    self.take_supervised_action()
@@ -1023,15 +1025,16 @@ class GazeboEnv(gym.Env):
         #     except Exception as e:
         #         self.node.get_logger().error("laser_error reseting")
         #         # self.reset(reset_gazebo = True)
-        while self.robot.pos_history.avg_frame_rate is None or self.robot.velocity_history.avg_frame_rate is None or self.person.velocity_history.avg_frame_rate is None:
+        while self.robot.pos_history.avg_frame_rate is None or self.person.pos_history.avg_frame_rate is None or self.robot.velocity_history.avg_frame_rate is None or self.person.velocity_history.avg_frame_rate is None:
             #self.node.get_logger().info("waiting to get_observation {} {} {}".format(self.robot.pos_history.avg_frame_rate, self.robot.velocity_history.avg_frame_rate, self.person.velocity_history.avg_frame_rate))
             if self.is_reseting:
                 return None
             time.sleep(0.001)
-        pos_his = self.robot.pos_history.get_elemets()
+        pos_his_robot = self.robot.pos_history.get_elemets()
+        pos_his_person = self.person.pos_history.get_elemets()
         pos_rel = []
-        for pos in pos_his:
-            relative = GazeboEnv.get_relative_position(pos, self.person, self.node)
+        for pos in (pos_his_robot+pos_his_person):
+            relative = GazeboEnv.get_relative_position(pos, self.robot, self.node)
             pos_rel.append(relative)
         pos_history = np.asarray(np.asarray(pos_rel)).flatten()/5.0
         #heading_history = np.asarray(self.robot.get_relative_orientation())/math.pi
@@ -1098,7 +1101,7 @@ class GazeboEnv(gym.Env):
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
-        time.sleep(0.1)
+        time.sleep(0.2)
         reward = self.get_reward(action)
         ob = self.get_observation()
         episode_over = False
