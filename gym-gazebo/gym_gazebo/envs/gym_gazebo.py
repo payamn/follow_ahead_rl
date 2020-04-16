@@ -368,7 +368,7 @@ class Robot():
             cmd_vel.angular.z = float(angular_vel)
             self.cmd_vel_pub.publish(cmd_vel)
         elif self.action_mode_ == "point":
-            self.node.get_logger().info("action is: {}".format(action))
+            # self.node.get_logger().info("action is: {}".format(action))
             pos = GazeboEnv.get_global_position(action, center_object, self.node)
             self.update_goal(pos)
 
@@ -538,7 +538,7 @@ class GazeboEnv(gym.Env):
 
         # curriculam param
         self.max_mod_person_ = 7
-        self.use_random_around_person_ = False
+        self.use_random_around_person_ = True
         self.robot_thread = None
 
         self.wait_observation_ = 0
@@ -557,7 +557,7 @@ class GazeboEnv(gym.Env):
         self.current_obsevation_image_ = np.zeros([2000,2000,3])
         self.current_obsevation_image_.fill(255)
 
-        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(46,))
+        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(47,))
         # gym.spaces.Tuple(
         #     (
         #         gym.spaces.Box(low=0, high=1, shape=(50, 100, 5)),
@@ -925,7 +925,7 @@ class GazeboEnv(gym.Env):
             elif self.is_evaluation_:
                 mode_person = 2
             else:
-                mode_person = 4#random.randint(0, self.max_mod_person_)
+                mode_person = random.randint(4, 5) #random.randint(0, self.max_mod_person_)
             # if mode_person == 0:
             #     person_thread = threading.Thread(target=self.person.go_to_goal, args=())
             #     person_thread.start()
@@ -1016,6 +1016,15 @@ class GazeboEnv(gym.Env):
             cv.imshow("d", image)
         cv.waitKey(1)
 
+    @staticmethod
+    def pi_pi(angle):
+        while angle > math.pi:
+            angle -= 2*math.pi
+        while angle < -math.pi:
+            angle += 2*math.pi
+
+        return angle
+
     def get_observation(self):
         # got_laser = False
         # while not got_laser:
@@ -1031,7 +1040,12 @@ class GazeboEnv(gym.Env):
                 return None
             time.sleep(0.001)
         pos_his_robot = self.robot.pos_history.get_elemets()
+        heading_robot = self.robot.state_["orientation"]
+
         pos_his_person = self.person.pos_history.get_elemets()
+        heading_person = self.person.state_["orientation"]
+
+        heading_relative = GazeboEnv.pi_pi(heading_robot-heading_person)/(math.pi)
         pos_rel = []
         for pos in (pos_his_robot+pos_his_person):
             relative = GazeboEnv.get_relative_position(pos, self.robot, self.node)
@@ -1040,9 +1054,10 @@ class GazeboEnv(gym.Env):
         #heading_history = np.asarray(self.robot.get_relative_orientation())/math.pi
         # self.visualize_observation(poses, headings, self.get_laser_scan())
         #orientation_position = np.append(pose_history, heading_history)
-        velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))
+        velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))/self.robot.max_angular_vel
+        velocities_heading = np.append(velocities, heading_relative)
         #self.node.get_logger().info("velociy min: {} max: {} rate_vel: {} avg: {} clock {} vel {}".format(np.min(velocities), np.max(velocities), self.person.velocity_history.avg_frame_rate, self.person.velocity_history.update_rate, self.manager.get_time_sec(), self.person.get_velocity()))
-        final_ob =  np.append(np.append(pos_history, velocities), self.prev_action)
+        final_ob =  np.append(np.append(pos_history, velocities_heading), self.prev_action)
 
         #self.node.get_logger().info("{}{} {}".format(final_ob.shape, velocities.shape, pos_history.shape))
         return final_ob
