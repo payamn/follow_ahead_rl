@@ -1967,8 +1967,8 @@
       <static>1</static>
     </model>
     <physics name='default_physics' default='0' type='ode'>
-      <real_time_update_rate>1000</real_time_update_rate>
-      <max_step_size>0.0025</max_step_size>
+      <real_time_update_rate>500</real_time_update_rate>
+      <max_step_size>0.004</max_step_size>
       <real_time_factor>1</real_time_factor>
       <ode>
         <solver>
@@ -2180,45 +2180,6 @@
             </mesh>
           </geometry>
         </visual>
-        <sensor name='hls_lfcd_lds' type='ray'>
-          <always_on>1</always_on>
-          <visualize>1</visualize>
-          <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
-          <update_rate>5</update_rate>
-          <ray>
-            <scan>
-              <horizontal>
-                <samples>180</samples>
-                <resolution>1</resolution>
-                <min_angle>-1.57</min_angle>
-                <max_angle>1.57</max_angle>
-              </horizontal>
-              <vertical>
-                <samples>1</samples>
-                <min_angle>0</min_angle>
-                <max_angle>0</max_angle>
-              </vertical>
-            </scan>
-            <range>
-              <min>0.12</min>
-              <max>5</max>
-              <resolution>0.015</resolution>
-            </range>
-            <noise>
-              <type>gaussian</type>
-              <mean>0</mean>
-              <stddev>0.01</stddev>
-            </noise>
-          </ray>
-          <plugin name='turtlebot3_laserscan' filename='libgazebo_ros_ray_sensor.so'>
-            <ros>
-              <argument>~/out:=scan</argument>
-              <namespace>my_robot_0</namespace>
-            </ros>
-            <output_type>sensor_msgs/LaserScan</output_type>
-            <frame_name>base_scan</frame_name>
-          </plugin>
-        </sensor>
         <self_collide>0</self_collide>
         <enable_wind>0</enable_wind>
         <kinematic>0</kinematic>
@@ -2666,45 +2627,6 @@
             </mesh>
           </geometry>
         </visual>
-        <sensor name='hls_lfcd_lds' type='ray'>
-          <always_on>1</always_on>
-          <visualize>1</visualize>
-          <pose frame=''>-0.032 0 0.171 0 -0 0</pose>
-          <update_rate>5</update_rate>
-          <ray>
-            <scan>
-              <horizontal>
-                <samples>180</samples>
-                <resolution>1</resolution>
-                <min_angle>-1.57</min_angle>
-                <max_angle>1.57</max_angle>
-              </horizontal>
-              <vertical>
-                <samples>1</samples>
-                <min_angle>0</min_angle>
-                <max_angle>0</max_angle>
-              </vertical>
-            </scan>
-            <range>
-              <min>0.12</min>
-              <max>5</max>
-              <resolution>0.015</resolution>
-            </range>
-            <noise>
-              <type>gaussian</type>
-              <mean>0</mean>
-              <stddev>0.01</stddev>
-            </noise>
-          </ray>
-          <plugin name='turtlebot3_laserscan' filename='libgazebo_ros_ray_sensor.so'>
-            <ros>
-              <argument>~/out:=scan</argument>
-              <namespace>person_0</namespace>
-            </ros>
-            <output_type>sensor_msgs/LaserScan</output_type>
-            <frame_name>base_scan</frame_name>
-          </plugin>
-        </sensor>
         <self_collide>0</self_collide>
         <enable_wind>0</enable_wind>
         <kinematic>0</kinematic>

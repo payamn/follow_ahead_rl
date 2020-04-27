@@ -433,16 +433,21 @@ class Robot():
     def go_to_goal(self):
         while True:
             if self.reset:
+                print ("reseting returning")
                 return
             while self.goal is None:
+                if self.reset:
+                    print ("reseting returning")
+                    return
                 time.sleep(0.1)
                 continue
-            diff_angle, distance = self.angle_distance_to_point(self.goal)
+            distance = None
+            while distance is None and not self.reset:
+                diff_angle, distance = self.angle_distance_to_point(self.goal)
             time_prev = self.manager.get_time_sec()
             while not distance < 0.1 and abs(self.manager.get_time_sec() - time_prev) < 5:
                 if self.is_pause:
                     self.stop_robot()
-                    return
                 if self.reset:
                     return
                 diff_angle, distance = self.angle_distance_to_point(self.goal)
@@ -538,7 +543,7 @@ class GazeboEnv(gym.Env):
 
         # curriculam param
         self.max_mod_person_ = 7
-        self.use_random_around_person_ = True
+        self.use_random_around_person_ = False
         self.robot_thread = None
 
         self.wait_observation_ = 0
@@ -573,7 +578,7 @@ class GazeboEnv(gym.Env):
         if self.test_simulation_ or self.is_evaluation_:
            self.max_numb_steps = 1000000000000000000
         else:
-            self.max_numb_steps = 100
+            self.max_numb_steps = 1000
         self.reward_range = [-1, 1]
         self.manager = None
 
@@ -700,17 +705,17 @@ class GazeboEnv(gym.Env):
         self.goal_color = [0,255,0]
         self.wait_counter_ = 5
 
+        self.is_reseting = False
+        self.robot.reset = False
+        self.person.reset = False
         self.path_finished = False
         self.position_thread = threading.Thread(target=self.path_follower, args=(self.current_path_idx, self.robot,))
         self.position_thread.daemon = True
 
-        self.is_reseting = False
         self.position_thread.start()
-
-        self.robot.reset = False
-        self.person.reset = False
         # TODO: comment this after start agent
         # self.resume_simulator()
+        self.is_pause = False
         self.node.get_logger().debug("init simulation finished")
 
     def states_cb(self, states_msg):
@@ -925,7 +930,7 @@ class GazeboEnv(gym.Env):
             elif self.is_evaluation_:
                 mode_person = 2
             else:
-                mode_person = random.randint(4, 5) #random.randint(0, self.max_mod_person_)
+                mode_person = 0#random.randint(4, 5) #random.randint(0, self.max_mod_person_)
             # if mode_person == 0:
             #     person_thread = threading.Thread(target=self.person.go_to_goal, args=())
             #     person_thread.start()
@@ -1035,6 +1040,7 @@ class GazeboEnv(gym.Env):
         #         self.node.get_logger().error("laser_error reseting")
         #         # self.reset(reset_gazebo = True)
         while self.robot.pos_history.avg_frame_rate is None or self.person.pos_history.avg_frame_rate is None or self.robot.velocity_history.avg_frame_rate is None or self.person.velocity_history.avg_frame_rate is None:
+            print ("no obbservation")
             #self.node.get_logger().info("waiting to get_observation {} {} {}".format(self.robot.pos_history.avg_frame_rate, self.robot.velocity_history.avg_frame_rate, self.person.velocity_history.avg_frame_rate))
             if self.is_reseting:
                 return None
@@ -1141,7 +1147,8 @@ class GazeboEnv(gym.Env):
             episode_over = True
             if self.agent_num==0:
                 self.node.get_logger().info('agent: {} max number of steps episode over'.format(self.agent_num))
-        reward = min(max(reward, -1), 1)
+        #reward = min(max(reward, -1), 1)
+        reward *= 100
         self.node.get_logger().debug("agent: {} action {} reward {}".format((self.agent_num),action, reward))
         self.prev_action = action
         #reward += 1
@@ -1204,18 +1211,18 @@ class GazeboEnv(gym.Env):
             # Negative reward for being behind the person
             if self.is_collided():
                 reward -= 1
-            if distance < 0.3:
-                reward -= 1
-            elif abs(distance - 1.7) < 0.7:
-                reward += 0.1 * (0.7 - abs(distance - 1.7))
-            elif distance >= 1.7:
-                reward -= 0.25 * (distance - 1.7)
+            elif distance < 0.5:
+                reward -= 0.6
+            elif abs(distance - 1.5) < 0.5:
+                reward += 0.10 * (0.5 - abs(distance - 1.5))
+            elif distance >= 1.5:
+                reward -= 0.10 * (distance - 1.5)
             elif distance < 1:
                 reward -= (1 - distance)/2.0
             if abs(angle_robot_person) < 45:
-                reward += 0.2 * (45 - abs(angle_robot_person)) / 45
+                reward += 0.3 * (45 - abs(angle_robot_person)) / 45
             else:
-                reward -= 0.1 * abs(angle_robot_person) / 180
+                reward -= 0.2 * abs(angle_robot_person) / 180
 
             #control_reward = 0
             # control reward penalize if to much chenge for orientation
@@ -1225,7 +1232,7 @@ class GazeboEnv(gym.Env):
             # self.node.get_logger().debug("agent: {} control_reward is: {} prv/now: {} {}".format(self.agent_num, control_reward, self.prev_action[1], action[1]))
             #reward -= control_reward/5
 
-            reward = min(max(reward, -1), 1)
+         #   reward = min(max(reward, -1), 1)
             # ToDO check for obstacle
         return reward
 
@@ -1325,20 +1332,23 @@ class GazeboEnv(gym.Env):
         # plt.show()
 
     def reset(self, reset_gazebo=False):
+        print("in reset")
 
         if self.is_reseting:
+            print("in is reset")
             return self.observation_after_reset_done()
 
-        self.is_pause = True
         self.is_reseting = True
+        self.is_pause = True
         self.robot.reset = True
         self.person.reset = True
         self.node.get_logger().debug("trying to get the lock for reset")
         # if reset_gazebo:
         #     self.reset_gazebo()
+        print("get lock reset")
         with self.lock:
 
-            self.node.get_logger().debug("got the lock")
+            print("got the lock")
             # self.node.get_logger().info("got the lock")
             # try:
             #     # self.manager.pause()
@@ -1354,10 +1364,11 @@ class GazeboEnv(gym.Env):
             try:
                 if self.position_thread.isAlive():
 
-                    self.node.get_logger().debug("wait for position thread to join")
+                    print("wait for position thread to join")
                     self.position_thread.join()
-                    self.node.get_logger().debug("position thread joined")
+                    print("position thread joined")
                 if self.robot_mode >= 1 and self.robot_thread is not None and self.robot_thread.isAlive():
+                    print("wait for robot thread to join")
                     self.robot_thread.join()
                 if self.is_evaluation_:
                     if self.log_file is not None:
@@ -1375,11 +1386,14 @@ class GazeboEnv(gym.Env):
                 self.init_simulator()
                 not_init = False
             except RuntimeError as e:
+                print("error happend {}".format(e))
                 self.node.get_logger().error("error happend reseting: {}".format(e))
         if not_init:
+            print("not init reset")
             self.node.get_logger().info("not init so run reset again")
             return (self.reset())
         else:
+            print("done reset")
             return self.get_observation()
 
     def render(self, mode='human', close=False):
