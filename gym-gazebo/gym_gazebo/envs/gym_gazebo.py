@@ -312,41 +312,6 @@ class Robot():
         # self.model_states_sub.destroy()
         self.reset = True
 
-    def states_cb(self, states_msg):
-        model_idx = None
-        prev_pos = self.state_["position"]
-        for i in range(len(states_msg.name)):
-            if states_msg.name[i] == self.name:
-                # self.node.get_logger().warn("statecb")
-                model_idx = i
-                break
-        if model_idx is None:
-            print("cannot find {}".format(self.name))
-            return
-
-        pos = states_msg.pose[model_idx]
-        self.state_["position"] = (pos.position.x + (random.random()-0.5)/5, pos.position.y+ (random.random()-0.5)/5)
-        euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
-        self.state_["orientation"] = euler[0] + (random.random()-0.5)*math.pi/7
-
-        if self.relative is not None and not self.relative.reset:
-            self.manager.node.get_logger().debug('before calling get rel in state cb {}'.format(self.state_))
-            orientation_rel, position_rel = GazeboEnv.get_relative_heading_position(self, self.relative, self.manager.node)
-            self.manager.node.get_logger().debug('after calling get rel in state cb ')
-            if orientation_rel is None or position_rel is None:
-                self.manager.node.get_logger().error('orientation or pos is none')
-            else:
-                self.manager.node.get_logger().debug("after state cb")
-                self.orientation_history.add_element(orientation_rel, self.manager.get_time_sec())
-                self.pos_history.add_element(position_rel, self.manager.get_time_sec())
-
-        # get velocity
-        twist = states_msg.twist[model_idx]
-        linear_vel = twist.linear.x + + (random.random()-0.5)/5
-        angular_Vel = twist.angular.z + (random.random()-0.5)*math.pi/7
-
-        self.velocity_history.add_element(np.asanyarray((linear_vel, angular_Vel)), self.manager.get_time_sec())
-
     def laser_cb(self, laser_msg):
 
         if self.reset:
@@ -564,7 +529,6 @@ class GazeboEnv(gym.Env):
 
         self.use_goal = False
         self.is_evaluation_ = is_evaluation
-        self.wait_counter_ = 0
 
         # curriculam param
         self.max_mod_person_ = 7
@@ -607,11 +571,12 @@ class GazeboEnv(gym.Env):
         if self.test_simulation_ or self.is_evaluation_:
            self.max_numb_steps = 1000000000000000000
         else:
-            self.max_numb_steps = 100
+            self.max_numb_steps = 1000
         self.reward_range = [-1, 1]
         self.manager = None
 
     def set_agent(self, agent_num):
+
         rclpy.init()
         self.node = rclpy.create_node("gazebo_env_{}".format(agent_num))
         # self.reset_gazebo(no_manager=True)
@@ -654,8 +619,11 @@ class GazeboEnv(gym.Env):
         self.model_states_sub = self.node.create_subscription(ModelStates, '/model_states', self.states_cb, qos_profile=qosProfileSensors)
         self.spin_thread = threading.Thread(target=self.spin, args=())
         self.spin_thread.start()
+        self.node.get_logger().info("agent {}: before get log in set agent".format(self.agent_num))
         with self.lock:
+            self.node.get_logger().info("agent {}: after get log in set agent".format(self.agent_num))
             self.init_simulator()
+            self.node.get_logger().info("agent {}: init_simulation done in set agent".format(self.agent_num))
 
 
     def spin(self):
@@ -664,7 +632,7 @@ class GazeboEnv(gym.Env):
             #     time.sleep(0.1)
             with self.manager.lock_spin:
                 rclpy.spin_once(self.node)
-            time.sleep(0.00001)
+            time.sleep(0.000001)
 
     def get_init_pos_robot_person(self):
         if self.is_evaluation_:
@@ -733,7 +701,6 @@ class GazeboEnv(gym.Env):
         self.robot_color = [255,0,0]
         self.person_color = [0,0,255]
         self.goal_color = [0,255,0]
-        self.wait_counter_ = 5
 
         self.is_reseting = False
         self.robot.reset = False
@@ -751,19 +718,14 @@ class GazeboEnv(gym.Env):
 
     def states_cb(self, states_msg):
 
-        if self.state_cb_prev_time is None or self.manager.get_time_sec() - self.state_cb_prev_time < 0.1:
+
+        if self.state_cb_prev_time is None or self.manager.get_time_sec() - self.state_cb_prev_time < 0.05:
             if self.state_cb_prev_time is None:
                 self.state_cb_prev_time = self.manager.get_time_sec()
             return
 
-        if self.state_cb_prev_time is not None and self.manager.get_time_sec() - self.state_cb_prev_time > 0.1:
-            self.wait_counter_ = 3
-
-        if self.wait_counter_ > 0:
-            self.wait_counter_ -= 1
-            return
-
         self.state_cb_prev_time = self.manager.get_time_sec()
+
         for model_idx in range(len(states_msg.name)):
             if states_msg.name[model_idx] == self.person.name:
                 robot = self.person
@@ -1061,7 +1023,9 @@ class GazeboEnv(gym.Env):
               self.person.velocity_history.avg_frame_rate is None:
             if self.is_reseting:
                 return None
-            time.sleep(0.001)
+            time.sleep(0.1)
+
+            #self.node.get_logger().info("agent {}: waiting in get_observation is_pause: {}, robot_availabe: {} person_available: {}".format(self.agent_num, self.is_pause, self.robot.pos_history.avg_frame_rate, self.person.pos_history.avg_frame_rate))
         pos_his_robot = self.robot.pos_history.get_elemets()
         heading_robot = self.robot.state_["orientation"]
 
