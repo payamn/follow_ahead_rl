@@ -1,0 +1,21 @@
+<launch>
+  <arg name="floor"  default="$(find follow_ahead_rl)/models/empty_floor/model.sdf"/>
+
+  <node name="spawn_sdf0" pkg="gazebo_ros" type="spawn_model" args="-sdf -model floor1 -x 0 -y 0 -z 0 -Y 0 -file $(arg floor)" />
+  <node name="spawn_sdf1" pkg="gazebo_ros" type="spawn_model" args="-sdf -model floor2 -x 0 -y 0 -z 2.6 -Y 0 -file $(arg floor)" />
+  <node name="spawn_sdf2" pkg="gazebo_ros" type="spawn_model" args="-sdf -model floor3 -x 0 -y 0 -z 5.2 -Y 0 -file $(arg floor)" />
+  <node name="spawn_sdf3" pkg="gazebo_ros" type="spawn_model" args="-sdf -model floor4 -x 0 -y 0 -z 7.8 -Y 0 -file $(arg floor)" />
+
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="world_name" value="$(find follow_ahead_rl)/worlds/empty.world"/>
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="true"/>
+    <arg name="headless" value="false"/>
+    <arg name="debug" value="false"/>
+  </include>
+
+  <include file="$(find follow_ahead_rl)/launch/spawn_tbs.launch"/>
+
+  </launch>
+

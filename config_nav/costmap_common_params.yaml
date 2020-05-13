@@ -18,7 +18,7 @@ controller_patience: 1.0
 # {name: conservative_clear, type: clear_costmap_recovery/ClearCostmapRecovery},
 # {name: aggressive_clear, type: clear_costmap_recovery/ClearCostmapRecovery}
 # ]
-# 
+#
 # conservative_clear:
 #   reset_distance: 3.00
 # aggressive_clear:
@@ -34,11 +34,11 @@ inflation:
     inflation_radius: 0.1
     cost_scaling_factor: 100.0
 
-obstacles_laser:
-    footprint_clearing_enabled: false
-    combination_method: Overwrite
-    observation_sources: laser
-    laser: {data_type: LaserScan, clearing: true, marking: true, topic: /turtlebot2/scan, inf_is_valid: true, obstacle_range: 3, raytrace_range: 3.4}
+    # obstacles_laser:
+    #     footprint_clearing_enabled: false
+    #     combination_method: Overwrite
+    #     observation_sources: laser
+    #     laser: {data_type: LaserScan, clearing: true, marking: true, topic: /turtlebot2/scan, inf_is_valid: true, obstacle_range: 3, raytrace_range: 3.4}
 
 # obstacles_laser:
 #     combination_method: Maximum

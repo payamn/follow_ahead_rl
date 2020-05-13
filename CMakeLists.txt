@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(follow_ahead_baseline)
+project(follow_ahead_rl)
 
 find_package(catkin REQUIRED COMPONENTS rospy)
 
@@ -7,7 +7,7 @@ find_package(catkin REQUIRED COMPONENTS rospy)
 #   FILES  # e.g. Floats.msg HeaderString.msg
 # )
 # add_service_files(
-#   DIRECTORY srv 
+#   DIRECTORY srv
 #   FILES AddTwoInts.srv BadTwoInts.srv
 # )
 
@@ -20,5 +20,5 @@ find_package(catkin REQUIRED COMPONENTS rospy)
 # generate_messages()
 
 catkin_package(
-  CATKIN_DEPENDS 
+  CATKIN_DEPENDS
 )

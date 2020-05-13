@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>follow_ahead_baseline</name>
+  <name>follow_ahead_rl</name>
   <version>0.0.0</version>
   <description>The my_pkg package</description>
 

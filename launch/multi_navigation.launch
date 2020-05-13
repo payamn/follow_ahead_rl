@@ -1,0 +1,14 @@
+<launch>
+  <include file="$(find follow_ahead_rl)/launch/navigation.launch">
+    <arg name="agent_num" value="0" />
+  </include>
+  <include file="$(find follow_ahead_rl)/launch/navigation.launch">
+    <arg name="agent_num" value="1" />
+  </include>
+  <include file="$(find follow_ahead_rl)/launch/navigation.launch">
+    <arg name="agent_num" value="2" />
+  </include>
+  <include file="$(find follow_ahead_rl)/launch/navigation.launch">
+    <arg name="agent_num" value="3" />
+  </include>
+</launch>
