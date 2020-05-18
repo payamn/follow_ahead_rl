@@ -473,11 +473,11 @@ class GazeborosEnv(gym.Env):
         else:
             self.max_numb_steps = 1000
         self.reward_range = [-1, 1]
-        rospy.wait_for_service('/gazebo/set_model_state')
-        self.set_model_state_sp = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
 
     def set_agent(self, agent_num):
         self.node = rospy.init_node('gym_gazeboros_{}'.format(agent_num))
+        rospy.wait_for_service('/gazebo/set_model_state')
+        self.set_model_state_sp = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
         date_time = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
         self.log_file = open('log_{}.pkl'.format(date_time), "wb")
         self.agent_num = agent_num
