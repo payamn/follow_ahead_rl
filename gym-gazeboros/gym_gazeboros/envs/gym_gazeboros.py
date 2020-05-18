@@ -177,11 +177,11 @@ class Robot():
        # Waits for the server to finish performing the action.
         wait = self.action_client_.wait_for_result(rospy.rostime.Duration(0.4))
        # If the result doesn't arrive, assume the Server is not available
-        if not wait:
-            rospy.logerr("Action server not available!")
-        else:
-        # Result of executing the action
-            return self.action_client_.get_result()
+        # if not wait:
+        #     rospy.logerr("Action server not available!")
+        # else:
+        # # Result of executing the action
+        #     return self.action_client_.get_result()
 
         def get_pos(self):
             counter_problem = 0
@@ -543,11 +543,13 @@ class GazeborosEnv(gym.Env):
                 obstacle_msg = ObstacleMsg()
                 obstacle_msg.header = obstacle_msg_array.header
                 obstacle_msg.id = 0
-                point = Point32()
-                point.x = pos.position.x
-                point.y = pos.position.y
-                point.z = pos.position.z
-                obstacle_msg.polygon.points.append(point)
+                for x in range (5):
+                    for y in range (5):
+                        point = Point32()
+                        point.x = pos.position.x + (x-2)*0.1
+                        point.y = pos.position.y + (y-2)*0.1
+                        point.z = pos.position.z
+                        obstacle_msg.polygon.points.append(point)
                 obstacle_msg.orientation.x = pos.orientation.x
                 obstacle_msg.orientation.y = pos.orientation.y
                 obstacle_msg.orientation.z = pos.orientation.z
@@ -983,7 +985,7 @@ class GazeborosEnv(gym.Env):
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
-        rospy.sleep(0.2)
+        rospy.sleep(0.3)
         reward = self.get_reward()
         ob = self.get_observation()
         episode_over = False
