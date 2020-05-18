@@ -977,8 +977,9 @@ class GazeborosEnv(gym.Env):
         pos = self.person.calculate_ahead(2)
         pos_person = self.person.get_pos()
         pos_relative = GazeborosEnv.get_relative_position(pos, self.robot)
+        pos_person_relative = GazeborosEnv.get_relative_position(pos_person, self.robot)
         pos_norm = GazeborosEnv.normalize(pos_relative, self.robot.max_rel_pos_range)
-        orientation = GazeborosEnv.normalize(math.atan2(pos[1] - pos_person[1], pos[0] - pos_person[1]), math.pi)
+        orientation = GazeborosEnv.normalize(math.atan2(pos_relative[1] - pos_person_relative[1], pos_relative[0] - pos_person_relative[0]), math.pi)
         return np.asarray((pos_norm[0], pos_norm[1], orientation))
 
 
@@ -993,8 +994,8 @@ class GazeborosEnv(gym.Env):
             rospy.logerr("person or robot orientation is None")
             return
         if self.first_call_observation:
-            self.add_circle_observation_to_image(robot_pos, self.robot_color, 3)
-            self.add_circle_observation_to_image(person_pos,self.person_color, 3)
+            self.add_circle_observation_to_image(robot_pos, [152,100,100], 10)
+            self.add_circle_observation_to_image(person_pos,[0,100,100], 10)
             self.first_call_observation = False
         self.add_arrow_observation_to_image(robot_pos, robot_orientation, self.robot_color)
         self.add_arrow_observation_to_image(person_pos, person_orientation, self.person_color)
