@@ -203,13 +203,14 @@ class Robot():
         counter_problem = 0
         while self.state_['orientation'] is None:
             if self.reset:
-                return (None, None)
+                return None
             if counter_problem > 20:
                 rospy.logdebug("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
             time.sleep(0.001)
             counter_problem += 1
             if counter_problem > 200:
                 raise Exception('Probable shared memory issue happend')
+        return self.state_['orientation']
 
     def is_current_state_ready(self):
         return (self.state_['position'][0] is not None)
@@ -266,9 +267,11 @@ class Robot():
 
         if self.use_goal:
             #TODO: add actionlib
-            self.goal["pos"] = GazeborosEnv.denormalize(action[0:2], self.max_rel_pos_range)
-            self.goal["orientation"] = GazeborosEnv.denormalize(action[2], math.pi)
-            pos_global, orientaion_global = GazeborosEnv.get_global_position(self.goal["pos"], self.goal["orientation"], self)
+            pos = GazeborosEnv.denormalize(action[0:2], self.max_rel_pos_range)
+            orientation = GazeborosEnv.denormalize(action[2], math.pi)
+            pos_global, orientaion_global = GazeborosEnv.get_global_position(pos, orientation, self)
+            self.goal["pos"] = pos_global
+            self.goal["orientation"] = orientaion_global
             self.movebase_client_goal(pos_global, orientaion_global)
             rospy.loginfo(pos_global)
         else:
@@ -448,12 +451,14 @@ class GazeborosEnv(gym.Env):
 
         self.use_random_around_person_ = False
         self.max_mod_person_ = 7
+        self.wait_observation_ = 0
 
         # being use for observation visualization
         self.center_pos_ = (0, 0)
         self.robot_color = [255,0,0]
         self.person_color = [0,0,255]
         self.goal_color = [0,255,0]
+        self.first_call_observation = True
 
         self.action_mode_ = "point"
 
@@ -471,7 +476,7 @@ class GazeborosEnv(gym.Env):
         if self.test_simulation_ or self.is_evaluation_:
            self.max_numb_steps = 1000000000000000000
         else:
-            self.max_numb_steps = 1000
+            self.max_numb_steps = 40
         self.reward_range = [-1, 1]
 
     def set_agent(self, agent_num):
@@ -624,6 +629,11 @@ class GazeborosEnv(gym.Env):
 
         init_pos_robot, init_pos_person = self.get_init_pos_robot_person()
         self.center_pos_ = init_pos_person["pos"]
+        self.robot_color = [255,0,0]
+        self.person_color = [0,0,255]
+        self.goal_color = [0,255,0]
+        self.first_call_observation = True
+
         self.current_obsevation_image_.fill(255)
         self.robot.update()
         self.person.update()
@@ -640,6 +650,7 @@ class GazeborosEnv(gym.Env):
 
         self.is_reseting = False
         self.position_thread.start()
+        self.wait_observation_ = 0
 
         self.is_reseting = False
         self.robot.reset = False
@@ -808,7 +819,7 @@ class GazeborosEnv(gym.Env):
             elif self.is_evaluation_:
                 mode_person = 2
             else:
-                mode_person = 0#random.randint(0, 7) #random.randint(0, self.max_mod_person_)
+                mode_person = random.randint(2, 5) #random.randint(0, self.max_mod_person_)
             # if mode_person == 0:
             #     person_thread = threading.Thread(target=self.person.go_to_goal, args=())
             #     person_thread.start()
@@ -931,7 +942,7 @@ class GazeborosEnv(gym.Env):
     def add_arrow_observation_to_image(self, pos, orientation, color):
         to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
         pos_image = to_image_fun(pos)
-        pos_image2 = to_image_fun((pos[0]+math.cos(orientation), pos[1]+math.sin(orientation)))
+        pos_image2 = to_image_fun((pos[0]+math.cos(orientation)*0.5, pos[1]+math.sin(orientation)*0.5))
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             rospy.logerr("problem with observation: {}".format(pos_image))
             return
@@ -960,13 +971,20 @@ class GazeborosEnv(gym.Env):
         person_pos = self.person.get_pos()
         person_orientation = self.person.get_orientation()
         current_goal = self.robot.get_goal()
+        if person_orientation is None or robot_orientation is None:
+            rospy.logerr("person or robot orientation is None")
+            return
+        if self.first_call_observation:
+            self.add_circle_observation_to_image(robot_pos, self.robot_color, 3)
+            self.add_circle_observation_to_image(person_pos,self.person_color, 3)
+            self.first_call_observation = False
         self.add_arrow_observation_to_image(robot_pos, robot_orientation, self.robot_color)
         self.add_arrow_observation_to_image(person_pos, person_orientation, self.person_color)
-        self.add_circle_observation_to_image(current_goal, self.goal_color, 5)
-        self.add_line_observation_to_image(robot_pos, current_goal, self.person_color)
+        self.add_arrow_observation_to_image(current_goal["pos"], current_goal["orientation"], self.goal_color)
+        self.add_line_observation_to_image(robot_pos, current_goal["pos"], self.person_color)
         alpha = 0.50
         self.current_obsevation_image_ = cv.addWeighted(self.new_obsevation_image_, alpha, self.current_obsevation_image_, 1 - alpha, 0)
-        #self.darken_all_colors()
+        self.darken_all_colors()
 
 
     def get_current_observation_image(self):
@@ -980,6 +998,10 @@ class GazeborosEnv(gym.Env):
     def take_action(self, action):
         self.prev_action = action
         self.robot.take_action(action)
+        if self.wait_observation_ <= 0:
+            self.update_observation_image()
+            self.wait_observation_ = 0
+        self.wait_observation_ -= 1
         return
 
     def step(self, action):
