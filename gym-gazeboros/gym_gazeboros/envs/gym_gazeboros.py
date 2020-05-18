@@ -155,6 +155,12 @@ class Robot():
         self.reset = False
         self.scan_image = None
 
+    def calculate_ahead(self, distance):
+        x = self.state_['position'][0] + math.cos(self.state_["orientation"]) * distance
+        y = self.state_['position'][1] + math.sin(self.state_["orientation"]) * distance
+        return (x,y)
+
+
     def movebase_cancel_goals(self):
         self.action_client_.cancel_all_goals()
 
@@ -962,6 +968,18 @@ class GazeborosEnv(gym.Env):
         self.person_color = darken_fun(self.person_color)
         self.goal_color = darken_fun(self.goal_color)
 
+    def get_supervised_action(self):
+        while not self.person.is_current_state_ready() and not self.is_reseting:
+            time.sleep(0.1)
+        if self.is_reseting:
+            return np.asarray([0,0])
+
+        pos = self.person.calculate_ahead(2)
+        pos_person = self.person.get_pos()
+        pos_relative = GazeborosEnv.get_relative_position(pos, self.robot)
+        pos_norm = GazeborosEnv.normalize(pos_relative, self.robot.max_rel_pos_range)
+        orientation = GazeborosEnv.normalize(math.atan2(pos[1] - pos_person[1], pos[0] - pos_person[1]), math.pi)
+        return np.asarray((pos_norm[0], pos_norm[1], orientation))
 
 
     def update_observation_image(self):
@@ -1139,7 +1157,8 @@ def test():
     gazeboros_env = GazeborosEnv()
     gazeboros_env.set_agent(0)
     while (True):
-        gazeboros_env.step((0.2,0, 0.1))
+        action = gazeboros_env.get_supervised_action()
+        gazeboros_env.step(action)
         time.sleep(0.1)
 
 
