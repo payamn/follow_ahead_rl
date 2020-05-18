@@ -2,33 +2,33 @@
 base_local_planner: teb_local_planner/TebLocalPlannerROS
 
 TebLocalPlannerROS:
-  sim_time: 1
-  map_frame: odom 
-     
+  sim_time: 2
+  map_frame: odom
+
   # Trajectory
-   
+
   teb_autosize: True
   dt_ref: 0.3
-  dt_hysteresis: 0.1
+  dt_hysteresis: 0.03
   global_plan_overwrite_orientation: True
-  max_global_plan_lookahead_dist: 4.5 # 3.0
-  feasibility_check_no_poses: 10
-     
+  max_global_plan_lookahead_dist: 3.0 # 3.0
+  feasibility_check_no_poses: 3
+
   # Robot
-          
-  max_vel_x: 0.7 # 0.7 #
+
+  max_vel_x: 1.4 # 0.7 #
   max_vel_x_backwards: 0.15 # 0.3
-  max_vel_theta: 1.5 # 2.5
-  acc_lim_x: 0.3 # 0.4
-  acc_lim_theta: 0.4 # 0.9
+  max_vel_theta: 2.1 # 2.5
+  acc_lim_x: 0.4 # 0.4
+  acc_lim_theta: 0.9 # 0.9
   min_turning_radius: 0.0
-  
+
   cmd_angle_instead_rotvel: false
   wheelbase: 0.5
-  
+
   footprint_model: # types: "point", "circular", "two_circles", "line", "polygon"
     type: "circular"
-    radius: 0.2 # for type "circular"
+    radius: 0.3 # for type "circular"
     #line_start: [-0.3, 0.0] # for type "line"
     #line_end: [0.3, 0.0] # for type "line"
     #front_offset: 0.2 # for type "two_circles"
@@ -37,14 +37,14 @@ TebLocalPlannerROS:
     #rear_radius: 0.2 # for type "two_circles"
     #vertices:  [[-0.2555, -0.2], [-0.2555, 0.2], [0.2555, 0.2], [0.2555, -0.2]]
   # GoalTolerance
-     
-  xy_goal_tolerance: 0.1
-  yaw_goal_tolerance: 0.1
+
+  xy_goal_tolerance: 0.2
+  yaw_goal_tolerance: 0.2
   free_goal_vel: true
 
-     
+
   # Obstacles
-     
+
   min_obstacle_dist: 0.25
   include_costmap_obstacles: False
   costmap_obstacles_behind_robot_dist: 1.0
@@ -58,32 +58,32 @@ TebLocalPlannerROS:
   costmap_converter_rate: 10
   # costmap_converter/CostmapToLinesDBSRANSAC:
   #    cluster_max_distance: 0.4
- 
+
   # Optimization
   force_reinit_new_goal_dist: 1
   no_inner_iterations: 5
   no_outer_iterations: 4
   optimization_activate: True
   optimization_verbose: False
-  penalty_epsilon: 0.1
-  weight_max_vel_x: 4
-  weight_max_vel_theta: 1
+  penalty_epsilon: 0.2
+  weight_max_vel_x: 19
+  weight_max_vel_theta: 5
   weight_acc_lim_x: 100
   weight_acc_lim_theta: 1
   weight_kinematics_nh: 1000
-  weight_kinematics_forward_drive: 30
-  weight_kinematics_turning_radius: 20
-  weight_optimaltime: 1
+  weight_kinematics_forward_drive: 3000
+  weight_kinematics_turning_radius: 10
+  weight_optimaltime: 100
   weight_obstacle: 50
   weight_dynamic_obstacle: 10 # not in use yet
-  selection_alternative_time_cost: False 
- 
+  selection_alternative_time_cost: True
+
   # Homotopy Class Planner
- 
+
   enable_homotopy_class_planning: True
   enable_multithreading: True
-  simple_exploration: False
-  max_number_classes: 4
+  simple_exploration: True
+  max_number_classes: 8
   roadmap_graph_no_samples: 15
   roadmap_graph_area_width: 5
   h_signature_prescaler: 0.5

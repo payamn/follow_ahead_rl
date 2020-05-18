@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from datetime import datetime
 
 import copy
@@ -13,15 +15,23 @@ import cv2 as cv
 
 import rospy
 
+# Brings in the SimpleActionClient
+import actionlib
+# Brings in the .action file and messages used by the move base action
+from move_base_msgs.msg import MoveBaseAction, MoveBaseGoal
+
+
 from squaternion import quat2euler
 from squaternion import euler2quat
 
 from sensor_msgs.msg import LaserScan
 from gazebo_msgs.msg import ModelState
 from geometry_msgs.msg import Point
+from geometry_msgs.msg import Point32
 from geometry_msgs.msg import TransformStamped
 from rosgraph_msgs.msg import Clock
-
+from costmap_converter.msg import ObstacleArrayMsg
+from costmap_converter.msg import ObstacleMsg
 from gazebo_msgs.msg import ModelStates
 from geometry_msgs.msg import Twist
 
@@ -103,29 +113,37 @@ class History():
 
 
 class Robot():
-    def __init__(self, name, max_angular_speed=1, max_linear_speed=1, relative=None):
+    def __init__(self, name, max_angular_speed=1, max_linear_speed=1, relative=None, agent_num=None):
         self.name = name
         self.init_node = False
         self.alive = True
         self.prev_call_gazeboros_ = None
         self.relative = relative
         self.log_history = []
+        self.agent_num = agent_num
         self.init_node = True
         self.deleted = False
         self.update_rate_states = 5
         self.current_vel_ = Twist()
-        self.goal = None
+        self.goal = {"pos": None, "orientation": None}
         self.use_goal = True
         self.collision_distance = 0.5
         self.max_angular_vel = max_angular_speed
         self.max_linear_vel = max_linear_speed
-        self.max_laser_range = 5.0 # meter
+        self.max_rel_pos_range = 5.0 # meter
         self.width_laserelement_image = 100
         self.height_laser_image = 50
         self.state_ = {'position':      (None, None),
                        'orientation':   None}
         self.cmd_vel_pub =  rospy.Publisher('/{}/cmd_vel'.format(name), Twist, queue_size=1)
 
+        if "tb3" in self.name:
+            # Create an action client called "move_base" with action definition file "MoveBaseAction"
+            self.action_client_ = actionlib.SimpleActionClient('/move_base_{}'.format(self.agent_num),MoveBaseAction)
+            # Waits until the action server has started up and started listening for goals.
+            self.action_client_.wait_for_server()
+        else:
+            self.action_client_ = None
 
         self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
@@ -137,19 +155,47 @@ class Robot():
         self.reset = False
         self.scan_image = None
 
-    def get_pos(self):
-        counter_problem = 0
-        while self.state_['position'] is None:
-            if self.reset:
-                return (None, None)
-            if counter_problem > 20:
-                rospy.logdebug("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
-            time.sleep(0.001)
-            counter_problem += 1
-            if counter_problem > 200:
-                raise Exception('Probable shared memory issue happend')
+    def movebase_cancel_goals(self):
+        self.action_client_.cancel_all_goals()
 
-        return self.state_['position']
+    def movebase_client_goal(self, goal_pos, goal_orientation):
+       # Creates a new goal with the MoveBaseGoal constructor
+        move_base_goal = MoveBaseGoal()
+        move_base_goal.target_pose.header.frame_id = "tb3_{}/odom".format(self.agent_num)
+        move_base_goal.target_pose.header.stamp = rospy.Time.now()
+        move_base_goal.target_pose.pose.position.x = goal_pos[0]
+        move_base_goal.target_pose.pose.position.y = goal_pos[1]
+        quaternion_rotation = euler2quat(0, goal_orientation, 0)
+
+        move_base_goal.target_pose.pose.orientation.x = quaternion_rotation[3]
+        move_base_goal.target_pose.pose.orientation.y = quaternion_rotation[1]
+        move_base_goal.target_pose.pose.orientation.z = quaternion_rotation[2]
+        move_base_goal.target_pose.pose.orientation.w = quaternion_rotation[0]
+
+       # Sends the move_base_goal to the action server.
+        self.action_client_.send_goal(move_base_goal)
+       # Waits for the server to finish performing the action.
+        wait = self.action_client_.wait_for_result(rospy.rostime.Duration(0.4))
+       # If the result doesn't arrive, assume the Server is not available
+        if not wait:
+            rospy.logerr("Action server not available!")
+        else:
+        # Result of executing the action
+            return self.action_client_.get_result()
+
+        def get_pos(self):
+            counter_problem = 0
+            while self.state_['position'] is None:
+                if self.reset:
+                    return (None, None)
+                if counter_problem > 20:
+                    rospy.logdebug("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
+                time.sleep(0.001)
+                counter_problem += 1
+                if counter_problem > 200:
+                    raise Exception('Probable shared memory issue happend')
+
+            return self.state_['position']
 
 
 
@@ -175,7 +221,7 @@ class Robot():
 
     def update(self):
         self.alive = True
-        self.goal = None
+        self.goal = {"pos": None, "orientation": None}
         self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
         self.pos_history = History(200, 10, self.update_rate_states)
@@ -205,7 +251,7 @@ class Robot():
 
 
     def get_velocity(self):
-        return self.velocity_history.get_elemets()
+        return self.velocity_history.get_latest()
 
     def pause(self):
         self.is_pause = True
@@ -220,7 +266,11 @@ class Robot():
 
         if self.use_goal:
             #TODO: add actionlib
-            self.goal = action
+            self.goal["pos"] = GazeborosEnv.denormalize(action[0:2], self.max_rel_pos_range)
+            self.goal["orientation"] = GazeborosEnv.denormalize(action[2], math.pi)
+            pos_global, orientaion_global = GazeborosEnv.get_global_position(self.goal["pos"], self.goal["orientation"], self)
+            self.movebase_client_goal(pos_global, orientaion_global)
+            rospy.loginfo(pos_global)
         else:
             linear_vel = max(min((1+action[0])/2., self.max_linear_vel), 0)
             angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
@@ -293,10 +343,10 @@ class Robot():
         while True:
             if self.reset:
                 return
-            while self.goal is None:
+            while self.goal["pos"] is None:
                 time.sleep(0.1)
                 continue
-            diff_angle, distance = self.angle_distance_to_point(self.goal)
+            diff_angle, distance = self.angle_distance_to_point(self.goal["pos"])
             time_prev = rospy.Time.now().to_sec()
             while not distance < 0.1 and abs(rospy.Time.now().to_sec() - time_prev) < 5:
                 if self.is_pause:
@@ -304,7 +354,7 @@ class Robot():
                     return
                 if self.reset:
                     return
-                diff_angle, distance = self.angle_distance_to_point(self.goal)
+                diff_angle, distance = self.angle_distance_to_point(self.goal["pos"])
                 if distance is None:
                     return
 
@@ -356,7 +406,7 @@ class Robot():
 
     def get_goal(self):
         counter_problem = 0
-        while self.goal is None:
+        while self.goal["pos"] is None:
             if self.reset:
                 return (None, None)
             if counter_problem > 20:
@@ -390,7 +440,6 @@ class GazeborosEnv(gym.Env):
 
     def __init__(self, is_evaluation=False):
 
-        self.node = rospy.init_node('gym_gazeboros')
         self.is_evaluation_ = is_evaluation
 
         self.is_reseting = True
@@ -412,11 +461,11 @@ class GazeborosEnv(gym.Env):
         self.current_obsevation_image_ = np.zeros([2000,2000,3])
 
 
-        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(46,))
+        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(48,))
         self.current_obsevation_image_.fill(255)
 
-        self.prev_action = (0,0)
-        self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
+        self.prev_action = (0, 0, 0)
+        self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0, -1.0]), high=np.array([1.0, 1.0, 1.0]), dtype=np.float32)
         self.min_distance = 1
         self.max_distance = 2.5
         if self.test_simulation_ or self.is_evaluation_:
@@ -428,9 +477,11 @@ class GazeborosEnv(gym.Env):
         self.set_model_state_sp = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
 
     def set_agent(self, agent_num):
+        self.node = rospy.init_node('gym_gazeboros_{}'.format(agent_num))
         date_time = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
         self.log_file = open('log_{}.pkl'.format(date_time), "wb")
         self.agent_num = agent_num
+        self.obstacle_pub_ =  rospy.Publisher('/move_base_node_{}/TebLocalPlannerROS/obstacles'.format(self.agent_num), ObstacleArrayMsg, queue_size=1)
         self.create_robots()
 
         self.path = {}
@@ -485,14 +536,34 @@ class GazeborosEnv(gym.Env):
             angular_vel = twist.angular.z
             state["velocity"] = (linear_vel, angular_vel)
             robot.set_state(state)
+            if robot.name == self.person.name:
+                obstacle_msg_array = ObstacleArrayMsg()
+                obstacle_msg_array.header.stamp = rospy.Time.now()
+                obstacle_msg_array.header.frame_id = "tb3_{}/odom".format(self.agent_num)
+                obstacle_msg = ObstacleMsg()
+                obstacle_msg.header = obstacle_msg_array.header
+                obstacle_msg.id = 0
+                point = Point32()
+                point.x = pos.position.x
+                point.y = pos.position.y
+                point.z = pos.position.z
+                obstacle_msg.polygon.points.append(point)
+                obstacle_msg.orientation.x = pos.orientation.x
+                obstacle_msg.orientation.y = pos.orientation.y
+                obstacle_msg.orientation.z = pos.orientation.z
+                obstacle_msg.orientation.w = pos.orientation.w
+                obstacle_msg.velocities.twist.linear.x = twist.linear.x
+                obstacle_msg.velocities.twist.angular.z = twist.linear.z
+                obstacle_msg_array.obstacles.append(obstacle_msg)
+                self.obstacle_pub_.publish(obstacle_msg_array)
 
     def create_robots(self):
 
         self.person = Robot('person_{}'.format(self.agent_num),
-                            max_angular_speed=2, max_linear_speed=.7)
+                            max_angular_speed=2, max_linear_speed=.7, agent_num=self.agent_num)
 
         self.robot = Robot('tb3_{}'.format(self.agent_num),
-                            max_angular_speed=3.0, max_linear_speed=1.2, relative=self.person)
+                            max_angular_speed=3.0, max_linear_speed=1.2, relative=self.person, agent_num=self.agent_num)
 
     def find_random_point_in_circle(self, radious, min_distance, around_point):
         max_r = 2
@@ -530,7 +601,7 @@ class GazeborosEnv(gym.Env):
     def set_pos(self, name, pose):
         set_model_msg = ModelState()
         set_model_msg.model_name = name
-        self.prev_action = (0,0)
+        self.prev_action = (0,0, 0)
         quaternion_rotation = euler2quat(0, pose["orientation"], 0)
 
         set_model_msg.pose.orientation.x = quaternion_rotation[3]
@@ -554,7 +625,7 @@ class GazeborosEnv(gym.Env):
         self.current_obsevation_image_.fill(255)
         self.robot.update()
         self.person.update()
-        self.prev_action = (0,0)
+        self.prev_action = (0, 0, 0)
         self.set_pos(self.robot.name, init_pos_robot)
         self.set_pos(self.person.name, init_pos_person)
 
@@ -590,6 +661,49 @@ class GazeborosEnv(gym.Env):
 
     def calculate_angle_using_path(self, idx):
         return math.atan2(self.path["points"][idx+1][1] - self.path["points"][idx][1], self.path["points"][idx+1][0] - self.path["points"][idx][0])
+
+    @staticmethod
+    def denormalize(value, max_val):
+        if type(value) == tuple or type(value) == list:
+            norm_val = [float(x) * max_val for x in value]
+        else:
+            norm_val = value * float(max_val)
+        return norm_val
+
+    @staticmethod
+    def normalize(value, max_val):
+        if type(value) == tuple or type(value) == list:
+            norm_val = [x/float(max_val) for x in value]
+        else:
+            norm_val = value/float(max_val)
+        return norm_val
+
+    @staticmethod
+    def get_global_position(pos_goal, orientation_goal, center):
+        while not center.is_current_state_ready():
+            if center.reset:
+                rospy.logwarn("reseting so return none in rel pos rel: {} center".format(relative.is_current_state_ready(), center.is_current_state_ready()))
+                return (None, None)
+            time.sleep(0.01)
+            rospy.logwarn ("waiting for observation to be ready")
+        #relative_orientation = relative.state_['orientation']
+        center_pos = np.asarray(center.state_['position'])
+        center_orientation = center.state_['orientation']
+
+        #pos = [x * 5 for x in pos_goal]
+
+        relative_pos = np.asarray(pos_goal)
+        relative_pos2 = np.asarray((relative_pos[0] +math.cos(orientation_goal) , relative_pos[1] + math.sin(orientation_goal)))
+
+        # transform the relative to center coordinat
+        rotation_matrix = np.asarray([[np.cos(center_orientation), np.sin(center_orientation)], [-np.sin(center_orientation), np.cos(center_orientation)]])
+        relative_pos = np.matmul(relative_pos, rotation_matrix)
+        relative_pos2 = np.matmul(relative_pos2, rotation_matrix)
+        global_pos = np.asarray(relative_pos + center_pos)
+        global_pos2 = np.asarray(relative_pos2 + center_pos)
+        new_orientation = np.arctan2(global_pos2[1]-global_pos[1], global_pos2[0]-global_pos[0])
+        return global_pos, new_orientation
+
 
     @staticmethod
     def wrap_pi_to_pi(angle):
@@ -862,13 +976,14 @@ class GazeborosEnv(gym.Env):
 
 
     def take_action(self, action):
+        self.prev_action = action
         self.robot.take_action(action)
         return
 
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
-        rospy.sleep(0.05)
+        rospy.sleep(0.2)
         reward = self.get_reward()
         ob = self.get_observation()
         episode_over = False
@@ -1000,8 +1115,8 @@ def test():
     gazeboros_env = GazeborosEnv()
     gazeboros_env.set_agent(0)
     while (True):
-        gazeboros_env.step((0,0))
+        gazeboros_env.step((0.2,0, 0.1))
         time.sleep(0.1)
 
 
-test()
+#test()
