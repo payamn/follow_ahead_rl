@@ -11,16 +11,16 @@ TebLocalPlannerROS:
   dt_ref: 0.3
   dt_hysteresis: 0.03
   global_plan_overwrite_orientation: True
-  max_global_plan_lookahead_dist: 3.0 # 3.0
+  max_global_plan_lookahead_dist: 5.0 # 3.0
   feasibility_check_no_poses: 3
 
   # Robot
 
-  max_vel_x: 1.0 # 0.7 #
-  max_vel_x_backwards: 0.15 # 0.3
+  max_vel_x: 1.2 # 0.7 #
+  max_vel_x_backwards: 1 # 0.3
   max_vel_theta: 2.1 # 2.5
-  acc_lim_x: 0.4 # 0.4
-  acc_lim_theta: 0.5 # 0.9
+  acc_lim_x: 1 # 0.4
+  acc_lim_theta: 2 # 0.9
   min_turning_radius: 0.0
 
   cmd_angle_instead_rotvel: false
@@ -45,8 +45,11 @@ TebLocalPlannerROS:
 
   # Obstacles
 
-  min_obstacle_dist: 0.25
+  min_obstacle_dist: 0.35
+  inflation_dist: 0.35
+  dynamic_obstacle_inflation_dist: 0.55
   include_costmap_obstacles: False
+  include_dynamic_obstacles: True
   costmap_obstacles_behind_robot_dist: 1.0
   obstacle_poses_affected: 30
   costmap_converter_plugin: "costmap_converter::CostmapToPolygonsDBSMCCH"
@@ -60,7 +63,7 @@ TebLocalPlannerROS:
   #    cluster_max_distance: 0.4
 
   # Optimization
-  force_reinit_new_goal_dist: 1
+  force_reinit_new_goal_dist: 0.76
   no_inner_iterations: 5
   no_outer_iterations: 4
   optimization_activate: True
@@ -74,9 +77,11 @@ TebLocalPlannerROS:
   weight_kinematics_forward_drive: 3000
   weight_kinematics_turning_radius: 10
   weight_optimaltime: 100
-  weight_obstacle: 50
-  weight_dynamic_obstacle: 10 # not in use yet
+  weight_obstacle: 150
+  weight_dynamic_obstacle: 800 # not in use yet
   selection_alternative_time_cost: True
+
+  exact_arc_length: False
 
   # Homotopy Class Planner
 
