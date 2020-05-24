@@ -1033,8 +1033,14 @@ class GazeborosEnv(gym.Env):
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
-        rospy.sleep(0.3)
-        reward = self.get_reward()
+        # instead of one reward get all the reward during wait
+        # rospy.sleep(0.4)
+        sleep_time = 0.4
+        rewards = []
+        for t in range (100):
+            rospy.sleep(sleep_time/100.)
+            reward_range.append(self.get_reward())
+        reward = np.mean(rewards)
         ob = self.get_observation()
         episode_over = False
         rel_person = GazeborosEnv.get_relative_heading_position(self.robot, self.person)[1]
@@ -1063,7 +1069,7 @@ class GazeborosEnv(gym.Env):
     def is_collided(self):
         rel_person = GazeborosEnv.get_relative_heading_position(self.robot, self.person)[1]
         distance = math.hypot(rel_person[0], rel_person[1])
-        if distance < 0.8 or self.robot.is_collided:
+        if distance < 0.3 or self.robot.is_collided:
             return True
         return False
 
