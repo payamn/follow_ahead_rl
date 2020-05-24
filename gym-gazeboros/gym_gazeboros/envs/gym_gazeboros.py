@@ -141,7 +141,7 @@ class Robot():
             # Create an action client called "move_base" with action definition file "MoveBaseAction"
             self.action_client_ = actionlib.SimpleActionClient('/move_base_{}'.format(self.agent_num),MoveBaseAction)
             # Waits until the action server has started up and started listening for goals.
-            self.action_client_.wait_for_server()
+            self.action_client_.wait_for_server(rospy.rostime.Duration(0.4))
         else:
             self.action_client_ = None
 
@@ -163,6 +163,7 @@ class Robot():
 
     def movebase_cancel_goals(self):
         self.action_client_.cancel_all_goals()
+        self.stop_robot()
 
     def movebase_client_goal(self, goal_pos, goal_orientation):
        # Creates a new goal with the MoveBaseGoal constructor
@@ -455,6 +456,7 @@ class GazeborosEnv(gym.Env):
         self.lock = _thread.allocate_lock()
         self.robot_mode = 0
 
+        self.fallen = False
         self.use_random_around_person_ = False
         self.max_mod_person_ = 7
         self.wait_observation_ = 0
@@ -540,6 +542,9 @@ class GazeborosEnv(gym.Env):
             state = {}
             state["position"] = (pos.position.x, pos.position.y)
             euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
+            fall_angle = np.deg2rad(90)
+            if abs(abs(euler[1]) - fall_angle)< 0.1 or abs(abs(euler[2]) - fall_angle)<0.1:
+                self.fallen = True
             state["orientation"] = euler[0]
             # get velocity
             twist = states_msg.twist[model_idx]
@@ -622,7 +627,7 @@ class GazeborosEnv(gym.Env):
         set_model_msg.pose.orientation.z = quaternion_rotation[2]
         set_model_msg.pose.orientation.w = quaternion_rotation[0]
 
-        set_model_msg.pose.position.z = 2.6 * self.agent_num
+        set_model_msg.pose.position.z = 2.63 * self.agent_num
         set_model_msg.pose.position.x = pose["pos"][0]
         set_model_msg.pose.position.y = pose["pos"][1]
         self.set_model_state_sp(set_model_msg)
@@ -637,11 +642,13 @@ class GazeborosEnv(gym.Env):
         self.center_pos_ = init_pos_person["pos"]
         self.robot_color = [255,0,0]
         self.person_color = [0,0,255]
+        self.fallen = False
         self.goal_color = [0,255,0]
         self.first_call_observation = True
 
         self.current_obsevation_image_.fill(255)
         self.robot.update()
+        self.robot.movebase_cancel_goals()
         self.person.update()
         self.prev_action = (0, 0, 0)
         self.set_pos(self.robot.name, init_pos_robot)
@@ -825,7 +832,7 @@ class GazeborosEnv(gym.Env):
             elif self.is_evaluation_:
                 mode_person = 2
             else:
-                mode_person = random.randint(2, 5) #random.randint(0, self.max_mod_person_)
+                mode_person = 4 #random.randint(0, self.max_mod_person_)
             # if mode_person == 0:
             #     person_thread = threading.Thread(target=self.person.go_to_goal, args=())
             #     person_thread.start()
@@ -1046,6 +1053,8 @@ class GazeborosEnv(gym.Env):
         elif self.number_of_steps > self.max_numb_steps:
             episode_over = True
             rospy.loginfo('max number of steps episode over')
+        if self.fallen:
+            episode_over = True
         reward = min(max(reward, -1), 1)
         rospy.loginfo("action {} reward {}".format(action, reward))
         #reward += 1
