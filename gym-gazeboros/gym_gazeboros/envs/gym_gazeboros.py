@@ -482,13 +482,16 @@ class GazeborosEnv(gym.Env):
         self.min_distance = 1
         self.max_distance = 2.5
         if self.test_simulation_ or self.is_evaluation_:
-           self.max_numb_steps = 1000000000000000000
+           self.max_numb_steps = 64
         else:
             self.max_numb_steps = 40
         self.reward_range = [-1, 1]
 
     def set_agent(self, agent_num):
-        self.node = rospy.init_node('gym_gazeboros_{}'.format(agent_num))
+        try:
+            self.node = rospy.init_node('gym_gazeboros_{}'.format(agent_num))
+        except Exception as e:
+            rospy.logerr("probably already init in another node {}".format(e))
         rospy.wait_for_service('/gazebo/set_model_state')
         self.set_model_state_sp = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
         date_time = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
@@ -1035,11 +1038,11 @@ class GazeborosEnv(gym.Env):
         self.take_action(action)
         # instead of one reward get all the reward during wait
         # rospy.sleep(0.4)
-        sleep_time = 0.4
+        sleep_time = 0.3
         rewards = []
         for t in range (100):
             rospy.sleep(sleep_time/100.)
-            reward_range.append(self.get_reward())
+            rewards.append(self.get_reward())
         reward = np.mean(rewards)
         ob = self.get_observation()
         episode_over = False
