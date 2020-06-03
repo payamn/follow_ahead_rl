@@ -484,7 +484,7 @@ class GazeborosEnv(gym.Env):
         if self.test_simulation_ or self.is_evaluation_:
            self.max_numb_steps = 64
         else:
-            self.max_numb_steps = 40
+            self.max_numb_steps = 90
         self.reward_range = [-1, 1]
 
     def set_agent(self, agent_num):
@@ -1007,6 +1007,9 @@ class GazeborosEnv(gym.Env):
             self.add_circle_observation_to_image(robot_pos, [152,100,100], 10)
             self.add_circle_observation_to_image(person_pos,[0,100,100], 10)
             self.first_call_observation = False
+        if self.is_collided():
+            self.add_circle_observation_to_image(robot_pos, [152,200,200], 10)
+            self.add_circle_observation_to_image(person_pos,[200,100,100], 10)
         self.add_arrow_observation_to_image(robot_pos, robot_orientation, self.robot_color)
         self.add_arrow_observation_to_image(person_pos, person_orientation, self.person_color)
         self.add_arrow_observation_to_image(current_goal["pos"], current_goal["orientation"], self.goal_color)
@@ -1038,7 +1041,7 @@ class GazeborosEnv(gym.Env):
         self.take_action(action)
         # instead of one reward get all the reward during wait
         # rospy.sleep(0.4)
-        sleep_time = 0.3
+        sleep_time = 0.1
         rewards = []
         for t in range (100):
             rospy.sleep(sleep_time/100.)
@@ -1053,6 +1056,7 @@ class GazeborosEnv(gym.Env):
             rospy.loginfo("path finished")
             episode_over = True
         if self.is_collided():
+            self.update_observation_image()
             episode_over = True
             rospy.loginfo('collision happened episode over')
             reward -= 0.5
@@ -1072,7 +1076,7 @@ class GazeborosEnv(gym.Env):
     def is_collided(self):
         rel_person = GazeborosEnv.get_relative_heading_position(self.robot, self.person)[1]
         distance = math.hypot(rel_person[0], rel_person[1])
-        if distance < 0.3 or self.robot.is_collided:
+        if distance < 0.15 or self.robot.is_collided:
             return True
         return False
 

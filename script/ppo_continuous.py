@@ -9,6 +9,7 @@ import random
 import gym
 import gym_gazeboros
 import numpy as np
+from logger import Logger
 
 import torch
 torch.multiprocessing.set_start_method('forkserver', force=True) # critical for make multiprocessing work
@@ -52,24 +53,24 @@ args = parser.parse_args()
 
 ENV_NAME = 'gazeboros-v0'  # environment name
 RANDOMSEED = 2  # random seed
+PROJECT_NAME = "ppo_v_0.1"  # Project name for loging
 
 EP_MAX = 10000  # total number of episodes for training
-EP_LEN = 60  # total number of steps for each episode
-GAMMA = 0.9  # reward discount
+EP_LEN = 30  # total number of steps for each episode
+GAMMA = 0.95  # reward discount
 A_LR = 0.0001  # learning rate for actor
 C_LR = 0.0002  # learning rate for critic
-BATCH = 128  # update batchsize
-A_UPDATE_STEPS = 10  # actor update steps
-C_UPDATE_STEPS = 10  # critic update steps
+BATCH = 64  # update batchsize
+A_UPDATE_STEPS = 5  # actor update steps
+C_UPDATE_STEPS = 5  # critic update steps
 EPS = 1e-8   # numerical residual
 MODEL_PATH = 'model/ppo_multi'
-NUM_WORKERS=4  # or: mp.cpu_count()
+NUM_WORKERS = 4  # or: mp.cpu_count()
 ACTION_RANGE = 1.  # if unnormalized, normalized action range should be 1.
 METHOD = [
     dict(name='kl_pen', kl_target=0.01, lam=0.5),  # KL penalty
     dict(name='clip', epsilon=0.2),  # Clipped surrogate objective, find this is better
-][0]  # choose the method for optimization
-
+    ][1]  # choose the method for optimization
 ###############################  PPO  ####################################
 
 
@@ -92,7 +93,7 @@ class ValueNetwork(nn.Module):
         super(ValueNetwork, self).__init__()
 
         self.linear1 = nn.Linear(state_dim, hidden_dim)
-        # self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        #self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         # self.linear3 = nn.Linear(hidden_dim, hidden_dim)
         self.linear4 = nn.Linear(hidden_dim, 1)
         # weights initialization
@@ -100,7 +101,7 @@ class ValueNetwork(nn.Module):
         self.linear4.bias.data.uniform_(-init_w, init_w)
 
     def forward(self, state):
-        x = F.relu(self.linear1(state))
+        x = F.leaky_relu(self.linear1(state))
         # x = F.relu(self.linear2(x))
         # x = F.relu(self.linear3(x))
         x = self.linear4(x)
@@ -129,12 +130,12 @@ class PolicyNetwork(nn.Module):
 
 
     def forward(self, state):
-        x = F.relu(self.linear1(state))
-        x = F.relu(self.linear2(x))
+        x = F.leaky_relu(self.linear1(state))
+        x = F.leaky_relu(self.linear2(x))
         # x = F.relu(self.linear3(x))
         # x = F.relu(self.linear4(x))
 
-        mean    = self.action_range * F.tanh(self.mean_linear(x))
+        mean = self.action_range * F.tanh(self.mean_linear(x))
         # implementation 1
         # log_std = self.log_std_linear(x)
         # log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
@@ -319,14 +320,15 @@ class PPO(object):
         torch.save(self.critic.state_dict(), path+'_critic')
         torch.save(self.actor_old.state_dict(), path+'_actor_old')
 
-    def load_model(self, path):
+    def load_model(self, path, set_eval=False):
         self.actor.load_state_dict(torch.load(path+'_actor'))
         self.critic.load_state_dict(torch.load(path+'_critic'))
         self.actor_old.load_state_dict(torch.load(path+'_actor_old'))
 
-        self.actor.eval()
-        self.critic.eval()
-        self.actor_old.eval()
+        if set_eval:
+            self.actor.eval()
+            self.critic.eval()
+            self.actor_old.eval()
 
 def ShareParameters(adamoptim):
     ''' share parameters of Adamoptimizers for multiprocessing '''
@@ -355,6 +357,7 @@ def worker(id, ppo, rewards_queue):
     env.set_agent(id)
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
+    logger = Logger("logs", "agent_{}".format(id), project_name=PROJECT_NAME)
 
     all_ep_r = []
     for ep in range(EP_MAX):
@@ -366,10 +369,14 @@ def worker(id, ppo, rewards_queue):
         }
         ep_r = 0
         t0 = time.time()
+        is_invalid = False
         for t in range(EP_LEN):  # in one episode
             # env.render()
             a = ppo.choose_action(s)
             s_, r, done, _ = env.step(a)
+            if done and t < 4:
+                is_invalid = True
+                break
             buffer['state'].append(s)
             buffer['action'].append(a)
             # buffer['reward'].append(r)
@@ -395,7 +402,9 @@ def worker(id, ppo, rewards_queue):
 
             if done:
                 break
-        if ep == 0:
+        if is_invalid:
+            continue
+        if len(all_ep_r) == 0:
             all_ep_r.append(ep_r)
         else:
             all_ep_r.append(all_ep_r[-1] * 0.9 + ep_r * 0.1)
@@ -407,6 +416,14 @@ def worker(id, ppo, rewards_queue):
                 time.time() - t0
             )
         )
+        logger.scalar_summary("reward", ep_r, ep)
+        observation_image = env.get_current_observation_image()
+        if t >= EP_LEN-1:
+            logger.image_summar("observation_end", observation_image, ep)
+        else:
+            logger.image_summar("observation_error", observation_image, ep)
+
+
         rewards_queue.put(ep_r)
     ppo.save_model(MODEL_PATH)
     env.close()
@@ -422,7 +439,7 @@ def main():
     action_dim = env.action_space.shape[0]
 
     ppo = PPO(state_dim, action_dim, hidden_dim=128)
-
+    ppo.load_model(MODEL_PATH)
     if args.train:
         ppo.actor.share_memory()
         ppo.actor_old.share_memory()
