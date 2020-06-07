@@ -227,7 +227,7 @@ class Robot():
                 self.orientation_history.avg_frame_rate is not None and\
                 self.velocity_history.avg_frame_rate is not None)
 
-    def update(self):
+    def update(self, init_pose):
         self.alive = True
         self.goal = {"pos": None, "orientation": None}
         self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
@@ -236,6 +236,8 @@ class Robot():
         self.orientation_history = History(200, 10, self.update_rate_states)
         self.velocity_history = History(200, 10, self.update_rate_states)
         self.velocity_history.add_element((0,0))
+        self.pos_history.add_element((init_pose["pos"][0],init_pose["pos"][1]))
+        self.orientation_history.add_element(init_pose["orientation"])
         self.log_history = []
         #self.prev_call_gazeboros_ = None
         #self.is_collided = False
@@ -650,15 +652,15 @@ class GazeborosEnv(gym.Env):
         self.first_call_observation = True
 
         self.current_obsevation_image_.fill(255)
-        self.robot.update()
         self.robot.movebase_cancel_goals()
-        self.person.update()
+        self.person.stop_robot()
+        self.robot.stop_robot()
         self.prev_action = (0, 0, 0)
         self.set_pos(self.robot.name, init_pos_robot)
         self.set_pos(self.person.name, init_pos_person)
 
-        self.robot.update()
-        self.person.update()
+        self.robot.update(init_pos_robot)
+        self.person.update(init_pos_person)
 
         self.path_finished = False
         self.position_thread = threading.Thread(target=self.path_follower, args=(self.current_path_idx, self.robot,))
@@ -1041,7 +1043,7 @@ class GazeborosEnv(gym.Env):
         self.take_action(action)
         # instead of one reward get all the reward during wait
         # rospy.sleep(0.4)
-        sleep_time = 0.1
+        sleep_time = 0.05
         rewards = []
         for t in range (100):
             rospy.sleep(sleep_time/100.)

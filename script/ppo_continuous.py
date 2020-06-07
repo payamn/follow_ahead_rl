@@ -53,7 +53,7 @@ args = parser.parse_args()
 
 ENV_NAME = 'gazeboros-v0'  # environment name
 RANDOMSEED = 2  # random seed
-PROJECT_NAME = "ppo_v_0.1"  # Project name for loging
+PROJECT_NAME = "ppo_v_0.2_2layerV"  # Project name for loging
 
 EP_MAX = 10000  # total number of episodes for training
 EP_LEN = 30  # total number of steps for each episode
@@ -93,16 +93,17 @@ class ValueNetwork(nn.Module):
         super(ValueNetwork, self).__init__()
 
         self.linear1 = nn.Linear(state_dim, hidden_dim)
-        #self.linear2 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         # self.linear3 = nn.Linear(hidden_dim, hidden_dim)
         self.linear4 = nn.Linear(hidden_dim, 1)
         # weights initialization
-        self.linear4.weight.data.uniform_(-init_w, init_w)
+        self.linear1.weight.data.uniform_(-init_w, init_w)
+        self.linear2.weight.data.uniform_(-init_w, init_w)
         self.linear4.bias.data.uniform_(-init_w, init_w)
 
     def forward(self, state):
         x = F.leaky_relu(self.linear1(state))
-        # x = F.relu(self.linear2(x))
+        x = F.relu(self.linear2(x))
         # x = F.relu(self.linear3(x))
         x = self.linear4(x)
         return x
@@ -221,6 +222,7 @@ class PPO(object):
         self.actor_optimizer.zero_grad()
         aloss.backward()
         self.actor_optimizer.step()
+        return aloss.item()
 
         if METHOD['name'] == 'kl_pen':
             return kl_mean
@@ -245,8 +247,10 @@ class PPO(object):
         advantage = cumulative_r - v
         closs = (advantage**2).mean()
         self.critic_optimizer.zero_grad()
+
         closs.backward()
         self.critic_optimizer.step()
+        return closs.item()
 
     def cal_adv(self, s, cumulative_r):
         '''
@@ -288,12 +292,13 @@ class PPO(object):
                 METHOD['lam'], 1e-4, 10
             )  # sometimes explode, this clipping is MorvanZhou's solution
         else:  # clipping method, find this is better (OpenAI's paper)
-            for _ in range(A_UPDATE_STEPS):
-                self.a_train(s, a, adv)
+            for i in range(A_UPDATE_STEPS):
+                loss_actor = self.a_train(s, a, adv)
 
         # update critic
         for _ in range(C_UPDATE_STEPS):
-            self.c_train(r, s)
+            loss_value = self.c_train(r, s)
+        return loss_actor, loss_value
 
     def choose_action(self, s):
         '''
@@ -398,7 +403,9 @@ def worker(id, ppo, rewards_queue):
 
                 bs, ba, br = np.vstack(buffer['state']), np.vstack(buffer['action']), np.array(discounted_r)[:, np.newaxis]
                 buffer['state'], buffer['action'], buffer['reward'] = [], [], []
-                ppo.update(bs, ba, br)
+                loss_policy, loss_actor = ppo.update(bs, ba, br)
+                logger.scalar_summary("actor_loss", loss_actor, ep)
+                logger.scalar_summary("policy_loss", loss_policy, ep)
 
             if done:
                 break
@@ -416,12 +423,12 @@ def worker(id, ppo, rewards_queue):
                 time.time() - t0
             )
         )
-        logger.scalar_summary("reward", ep_r, ep)
+        logger.scalar_summary("reward".format(id), ep_r, ep)
         observation_image = env.get_current_observation_image()
         if t >= EP_LEN-1:
-            logger.image_summar("observation_end", observation_image, ep)
+            logger.image_summar("agent_{}/observation_end".format(id), observation_image, ep)
         else:
-            logger.image_summar("observation_error", observation_image, ep)
+            logger.image_summar("agent_{}/observation_error".format(id), observation_image, ep)
 
 
         rewards_queue.put(ep_r)
@@ -439,7 +446,10 @@ def main():
     action_dim = env.action_space.shape[0]
 
     ppo = PPO(state_dim, action_dim, hidden_dim=128)
-    ppo.load_model(MODEL_PATH)
+    try:
+        ppo.load_model(MODEL_PATH)
+    except Exception as e:
+        print("error {}".format(e))
     if args.train:
         ppo.actor.share_memory()
         ppo.actor_old.share_memory()
