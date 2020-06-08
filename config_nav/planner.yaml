@@ -11,7 +11,7 @@ TrajectoryPlannerROS:
 # Robot Configuration Parameters
  # Current limits based on AZ3 standalone configuration.
   acc_lim_theta: 3.4
-  acc_lim_x: 3.2
+  acc_lim_x: 1.0
   acc_lim_y: 0.0
   angular_sim_granularity: 0.18
   escape_reset_dist: 0.1
@@ -19,7 +19,7 @@ TrajectoryPlannerROS:
   escape_vel: -0.2
   gdist_scale: 0.8
   acc_lim_y:  0.0
-  max_vel_x:  2.000
+  max_vel_x:  1.200
   max_vel_theta: 1.7
   min_vel_theta: -1.7
   min_vel_x:  -0.1
@@ -39,18 +39,18 @@ TrajectoryPlannerROS:
   vy_samples: 0
   vtheta_samples: 20
 
-  heading_scoring: true
+  heading_scoring: false
   heading_scoring_timestep: 2.0
+  simple_attractor: false
 
   goal_distance_bias: 0.8
   path_distance_bias: 0.6
   occdist_scale: 0.1
-  heading_lookahead: 2.325
-  dwa: true
+  heading_lookahead: 2.0
+  dwa: false
 
   oscillation_reset_dist: 0.05
   meter_scoring: true
-  global_frame_id: odom
 #   acc_lim_x: 0.9
 #   acc_lim_y: 2.5
 #   acc_lim_theta: 1.0

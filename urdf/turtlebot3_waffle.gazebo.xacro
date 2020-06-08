@@ -1,7 +1,8 @@
 <?xml version="1.0"?>
-<robot name="turtlebot3_burger_sim" xmlns:xacro="http://ros.org/wiki/xacro">
-  <xacro:arg name="laser_visual" default="false"/>
-  <xacro:arg name="imu_visual"   default="false"/>
+<robot name="turtlebot3_waffle_sim" xmlns:xacro="http://ros.org/wiki/xacro">
+  <xacro:arg name="laser_visual"  default="false"/>
+  <xacro:arg name="camera_visual" default="false"/>
+  <xacro:arg name="imu_visual"    default="false"/>
 
   <gazebo reference="base_link">
     <material>Gazebo/DarkGrey</material>
@@ -13,7 +14,7 @@
     <kp>500000.0</kp>
     <kd>10.0</kd>
     <minDepth>0.001</minDepth>
-    <maxVel>0.1</maxVel>
+    <maxVel>1.1</maxVel>
     <fdir1>1 0 0</fdir1>
     <material>Gazebo/FlatBlack</material>
   </gazebo>
@@ -24,27 +25,41 @@
     <kp>500000.0</kp>
     <kd>10.0</kd>
     <minDepth>0.001</minDepth>
-    <maxVel>0.1</maxVel>
+    <maxVel>1.1</maxVel>
     <fdir1>1 0 0</fdir1>
     <material>Gazebo/FlatBlack</material>
   </gazebo>
 
-  <gazebo reference="caster_back_link">
-    <mu1>5</mu1>
-    <mu2>5</mu2>
+  <gazebo reference="caster_back_right_link">
+    <mu1>0.2</mu1>
+    <mu2>0.2</mu2>
     <kp>1000000.0</kp>
     <kd>100.0</kd>
     <minDepth>0.001</minDepth>
-    <maxVel>1.0</maxVel>
+    <maxVel>1.5</maxVel>
+    <material>Gazebo/FlatBlack</material>
+  </gazebo>
+
+  <gazebo reference="caster_back_left_link">
+    <mu1>0.2</mu1>
+    <mu2>0.2</mu2>
+    <kp>1000000.0</kp>
+    <kd>100.0</kd>
+    <minDepth>0.001</minDepth>
+    <maxVel>1.5</maxVel>
     <material>Gazebo/FlatBlack</material>
   </gazebo>
 
   <gazebo reference="imu_link">
-    <material>Gazebo/FlatBlack</material>
+    <sensor type="imu" name="imu">
+      <always_on>true</always_on>
+      <visualize>$(arg imu_visual)</visualize>
+    </sensor>
+    <material>Gazebo/Grey</material>
   </gazebo>
 
   <gazebo>
-    <plugin name="turtlebot3_burger_controller" filename="libgazebo_ros_diff_drive.so">
+    <plugin name="turtlebot3_waffle_controller" filename="libgazebo_ros_diff_drive.so">
       <commandTopic>cmd_vel</commandTopic>
       <odometryTopic>odom</odometryTopic>
       <odometryFrame>odom</odometryFrame>
@@ -58,7 +73,7 @@
       <updateRate>30</updateRate>
       <leftJoint>wheel_left_joint</leftJoint>
       <rightJoint>wheel_right_joint</rightJoint>
-      <wheelSeparation>0.160</wheelSeparation>
+      <wheelSeparation>0.287</wheelSeparation>
       <wheelDiameter>0.066</wheelDiameter>
       <wheelAcceleration>1</wheelAcceleration>
       <wheelTorque>10</wheelTorque>
@@ -66,6 +81,34 @@
     </plugin>
   </gazebo>
 
+  <gazebo>
+    <plugin name="imu_plugin" filename="libgazebo_ros_imu.so">
+      <alwaysOn>true</alwaysOn>
+      <bodyName>imu_link</bodyName>
+      <frameName>imu_link</frameName>
+      <topicName>imu</topicName>
+      <serviceName>imu_service</serviceName>
+      <gaussianNoise>0.0</gaussianNoise>
+      <updateRate>200</updateRate>
+      <imu>
+        <noise>
+          <type>gaussian</type>
+          <rate>
+            <mean>0.0</mean>
+            <stddev>2e-4</stddev>
+            <bias_mean>0.0000075</bias_mean>
+            <bias_stddev>0.0000008</bias_stddev>
+          </rate>
+          <accel>
+            <mean>0.0</mean>
+            <stddev>1.7e-2</stddev>
+            <bias_mean>0.1</bias_mean>
+            <bias_stddev>0.001</bias_stddev>
+          </accel>
+        </noise>
+      </imu>
+    </plugin>
+  </gazebo>
 
   <gazebo reference="base_scan">
     <material>Gazebo/FlatBlack</material>

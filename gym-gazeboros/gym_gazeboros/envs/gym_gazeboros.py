@@ -455,6 +455,7 @@ class GazeborosEnv(gym.Env):
         self.is_evaluation_ = is_evaluation
 
         self.is_reseting = True
+        self.use_path = False
         self.lock = _thread.allocate_lock()
         self.robot_mode = 0
 
@@ -606,6 +607,10 @@ class GazeborosEnv(gym.Env):
         if self.is_evaluation_:
             init_pos_person = self.path["start_person"]
             init_pos_robot = self.path["start_robot"]
+        elif not self.use_path:
+            init_pos_person = {"pos": (0, 0), "orientation": random.random()*2*math.pi - math.pi}
+            init_pos_robot = {"pos": self.find_random_point_in_circle(1.5, 1, init_pos_person["pos"]),\
+                              "orientation": random.random()*2*math.pi - math.pi}#self.calculate_angle_using_path(idx_start)}
         elif self.use_random_around_person_:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
             init_pos_robot = {"pos": self.find_random_point_in_circle(1.5, 1, self.path["points"][idx_start]),\
@@ -1043,7 +1048,7 @@ class GazeborosEnv(gym.Env):
         self.take_action(action)
         # instead of one reward get all the reward during wait
         # rospy.sleep(0.4)
-        sleep_time = 0.05
+        sleep_time = 0.2
         rewards = []
         for t in range (100):
             rospy.sleep(sleep_time/100.)

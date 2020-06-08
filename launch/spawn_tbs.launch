@@ -1,5 +1,5 @@
 <launch>
-  <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]"/>
+  <arg name="model" default="waffle" doc="model type [burger, waffle, waffle_pi]"/>
   <arg name="first_tb3"  default="tb3_0"/>
   <arg name="first_person"  default="person_0"/>
   <arg name="second_tb3" default="tb3_1"/>
@@ -32,7 +32,7 @@
   <arg name="fourth_tb3_yaw"   default=" 0.0"/>
 
   <group ns = "$(arg first_person)">
-    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find follow_ahead_rl)/urdf/turtlebot3_$(arg model).urdf.xacro" />
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find follow_ahead_rl)/urdf/turtlebot3_$(arg model)_without_laser.urdf.xacro" />
 
     <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
       <param name="publish_frequency" type="double" value="50.0" />
@@ -54,7 +54,7 @@
   </group>
 
   <group ns = "$(arg second_person)">
-    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find follow_ahead_rl)/urdf/turtlebot3_$(arg model).urdf.xacro" />
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find follow_ahead_rl)/urdf/turtlebot3_$(arg model)_without_laser.urdf.xacro" />
 
     <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
       <param name="publish_frequency" type="double" value="50.0" />
@@ -76,7 +76,7 @@
   </group>
 
   <group ns = "$(arg third_person)">
-    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find follow_ahead_rl)/urdf/turtlebot3_$(arg model).urdf.xacro" />
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find follow_ahead_rl)/urdf/turtlebot3_$(arg model)_without_laser.urdf.xacro" />
 
     <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
       <param name="publish_frequency" type="double" value="50.0" />
@@ -98,7 +98,7 @@
   </group>
 
   <group ns = "$(arg fourth_person)">
-    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find follow_ahead_rl)/urdf/turtlebot3_$(arg model).urdf.xacro" />
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find follow_ahead_rl)/urdf/turtlebot3_$(arg model)_without_laser.urdf.xacro" />
 
     <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
       <param name="publish_frequency" type="double" value="50.0" />

@@ -1,0 +1,87 @@
+<?xml version='1.0'?>
+<sdf version='1.6'>
+  <model name='empty_floor_20_20'>
+    <pose frame=''>0.071578 0.011736 0 0 -0 0</pose>
+    <link name='Floor'>
+      <collision name='Floor'>
+        <geometry>
+          <box>
+            <size>1524.25 1169.5 0.1</size>
+          </box>
+        </geometry>
+        <surface>
+        <friction>
+          <ode>
+            <mu>5</mu>
+            <mu2>5</mu2>
+          </ode>
+        </friction>
+        </surface>
+        <pose frame=''>0 0 0.05 0 -0 0</pose>
+      </collision>
+      <visual name='Floor'>
+        <pose frame=''>0 0 0.05 0 -0 0</pose>
+        <geometry>
+          <box>
+            <size>0 0 0.1</size>
+          </box>
+        </geometry>
+        <material>
+          <script>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+            <name>Gazebo/White</name>
+          </script>
+          <ambient>0 0 0 0</ambient>
+        </material>
+        <meta>
+          <layer>1</layer>
+        </meta>
+      </visual>
+      <pose frame=''>-0.250009 -2e-06 0 0 -0 0</pose>
+    </link>  <link name='Wall_10'>
+      <collision name='Wall_10_Collision'>
+        <geometry>
+          <box>
+            <size>19.9552 0.15 2.5</size>
+          </box>
+        </geometry>
+        <pose frame=''>0 0 1.25 0 -0 0</pose>
+      </collision>
+      <pose frame=''>0.035696 9.80568 0 0 -0 0.011396</pose>
+    </link>
+    <link name='Wall_11'>
+      <collision name='Wall_11_Collision'>
+        <geometry>
+          <box>
+            <size>19.8021 0.15 2.5</size>
+          </box>
+        </geometry>
+        <pose frame=''>0 0 1.25 0 -0 0</pose>
+      </collision>
+      <pose frame=''>9.95352 0.05201 0 0 -0 -1.56918</pose>
+    </link>
+    <link name='Wall_12'>
+      <collision name='Wall_12_Collision'>
+        <geometry>
+          <box>
+            <size>20.0484 0.15 2.5</size>
+          </box>
+        </geometry>
+        <pose frame=''>0 0 1.25 0 -0 0</pose>
+      </collision>
+      <pose frame=''>-0.020016 -9.84644 0 0 -0 -3.13432</pose>
+    </link>
+    <link name='Wall_9'>
+      <collision name='Wall_9_Collision'>
+        <geometry>
+          <box>
+            <size>19.7619 0.15 2.5</size>
+          </box>
+        </geometry>
+        <pose frame=''>0 0 1.25 0 -0 0</pose>
+      </collision>
+      <pose frame=''>-9.91762 -0.092886 0 0 -0 1.56556</pose>
+    </link>
+    <static>1</static>
+  </model>
+</sdf>
