@@ -4,8 +4,15 @@
   <arg name="agent_num" default="0" />
   <arg name="base_frame" default="tb3_$(arg agent_num)/base_footprint" />
   <arg name="odom_frame" default="tb3_$(arg agent_num)/odom" />
+  <arg name="scan_frame" default="tb3_$(arg agent_num)/base_scan" />
+  <arg name="scan_topic" default="tb3_$(arg agent_num)/scan" />
   <arg name="odom_topic" default="/tb3_$(arg agent_num)/odom" />
   <arg name="map_frame" default="tb3_$(arg agent_num)/odom" />
+
+  <arg name="use_global" default="false"/>
+  <arg name="use_trajectory" default="false"/>
+  <arg name="use_teb" default="false"/>
+  <arg name="use_dwa" default="true"/>
 
 
   <!-- node pkg="gmapping" type="slam_gmapping" name="slam_gmapping" output="screen">
@@ -50,7 +57,42 @@
 
     <!-- Costmap common param (for both local and global) -->
     <param name="local_costmap/robot_base_frame" value="$(arg base_frame)" />
+    <param name="local_costmap/obstacles_laser/laser_sensor/sensor_frame" value="$(arg scan_frame)" />
+    <param name="local_costmap/obstacles_laser/laser_sensor/topic" value="$(arg scan_topic)" />
+    <param name="global_costmap/obstacles_laser/laser_sensor/sensor_frame" value="$(arg scan_frame)" />
+    <param name="global_costmap/obstacles_laser/laser_sensor/topic" value="$(arg scan_topic)" />
     <param name="global_costmap/robot_base_frame" value="$(arg base_frame)" />
+
+
+    <!-- Local planner -->
+    <arg name="base_local_planner" default="teb_local_planner/TebLocalPlannerROS" if="$(arg use_teb)"/>
+    <arg name="base_local_planner" default="base_local_planner/TrajectoryPlannerROS" if="$(arg use_trajectory)"/>
+    <arg name="base_local_planner" default="dwa_local_planner/DWAPlannerROS" if="$(arg use_dwa)"/>
+    <param name="TebLocalPlannerROS/odom_topic" value="$(arg odom_topic)" />
+    <param name="DWAPlannerROS/odom_topic" value="$(arg odom_topic)" />
+    <param name="TrajectoryPlannerROS/odom_topic" value="$(arg odom_topic)" />
+
+    <!-- For default base planner -->
+    <!-- <rosparam file="$(find follow_ahead_rl)/config_nav_pioneer/base_local_planner_params.yaml" command="load" /> -->
+
+    <!-- For teb base planner -->
+    <rosparam file="$(find follow_ahead_rl)/config_nav/teb_local_planner_params.yaml" command="load" if="$(arg use_teb)" />
+    <rosparam file="$(find follow_ahead_rl)/config_nav/planner.yaml" command="load" unless="$(arg use_teb)" />
+
+     <!-- global planner -->
+    <arg name="base_global_planner" default="global_planner/GlobalPlanner" if="$(arg use_global)">
+      <param name="publish_potential" value="True"/>
+      <param name="allow_unknown" value="true"/>
+      <param name="default_tolerance" value="0.1"/>
+      <param name="visualize_potential" value="false"/>
+      <param name="use_dijkstra" value="false"/>
+      <param name="use_quadratic" value="false"/>
+      <param name="old_navfn_behavior" value="false"/>
+      <param name="orientation_window_size" value="3"/>
+    </arg>
+  </node>
+  <arg name="base_global_planner" default="navfn/NavfnROS" unless="$(arg use_global)"/>
+</launch>
 
     <!-- Local param -->
     <param name="TebLocalPlannerROS/odom_topic" value="$(arg odom_topic)" />

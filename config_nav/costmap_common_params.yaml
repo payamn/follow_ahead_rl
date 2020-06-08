@@ -5,6 +5,7 @@ footprint: [[0.1,0.10], [0.1,-0.10], [-0.1,-0.10], [-0.1,0.10]]
 footprint_padding: 0.05
 inflation_radius: 0.1
 
+
 # inflation_layer:
 #   inflation_radius: 0.3 # 2xfootprint, it helps to keep the global planned path farther from obstacles
 transform_tolerance: 2
@@ -33,6 +34,23 @@ controller_patience: 1.0
 inflation:
     inflation_radius: 0.1
     cost_scaling_factor: 100.0
+
+
+obstacles_laser:
+    footprint_clearing_enabled: true
+    combination_method: Maximum
+    observation_sources: laser_sensor
+    laser_sensor: {
+      #      sensor_frame: $(arg sensor_frame),
+      data_type: LaserScan,
+      #      topic: $(arg sensor_topic),
+      expected_update_rate: 15.0,
+      marking: true, clearing: true,
+      min_obstacle_height: -2.0,
+      max_obstacle_height: 2.0,
+      obstacle_range: 8,
+      raytrace_range: 8.2
+      }
 
     # obstacles_laser:
     #     footprint_clearing_enabled: false
