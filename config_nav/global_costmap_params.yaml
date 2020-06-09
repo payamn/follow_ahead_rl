@@ -6,15 +6,15 @@
 global_costmap:
   #global_frame: odom
   #robot_base_frame: turtlebot2/base_footprint
+  rolling_window: true
   update_frequency: 10.0
   publish_frequency: 10.0
-  origin_x: -100
-  origin_y: -100
-  width: 200
-  height: 200
+  origin_x: 0
+  origin_y: 0
+  width:  50
+  height: 50
   publish_frequency: 3.0
   static_map: false
-  rolling_window: false
   track_unknown_space: false
   plugins:
     - {name: obstacles_laser,           type: "costmap_2d::ObstacleLayer"}

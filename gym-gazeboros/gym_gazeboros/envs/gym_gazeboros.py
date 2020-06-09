@@ -608,7 +608,7 @@ class GazeborosEnv(gym.Env):
             init_pos_robot = self.path["start_robot"]
         elif not self.use_path:
             init_pos_person = {"pos": (0, 0), "orientation": random.random()*2*math.pi - math.pi}
-            init_pos_robot = {"pos": self.find_random_point_in_circle(2.5, 2, init_pos_person["pos"]),\
+            init_pos_robot = {"pos": self.find_random_point_in_circle(2, 2.5, init_pos_person["pos"]),\
                               "orientation": random.random()*2*math.pi - math.pi}#self.calculate_angle_using_path(idx_start)}
         elif self.use_random_around_person_:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
