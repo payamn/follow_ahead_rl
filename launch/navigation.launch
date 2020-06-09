@@ -64,7 +64,7 @@
     <param name="local_costmap/global_frame" value="$(arg odom_frame)" />
     <param name="local_costmap/local_frame" value="$(arg scan_frame)" />
     <param name="global_costmap/global_frame" value="$(arg odom_frame)" />
-    <param name="global_costmap/local_frame" value="$(arg base_frame)" />
+    <param name="global_costmap/local_frame" value="$(arg scan_frame)" />
     <rosparam file="$(find follow_ahead_rl)/config_nav/costmap_common_params.yaml" command="load" ns="global_costmap" />
     <rosparam file="$(find follow_ahead_rl)/config_nav/costmap_common_params.yaml" command="load" ns="local_costmap" />
     <rosparam file="$(find follow_ahead_rl)/config_nav/local_costmap_params.yaml" command="load" />
@@ -76,7 +76,7 @@
     <param name="local_costmap/obstacles_laser/laser_sensor/topic" value="$(arg scan_topic)" />
     <param name="global_costmap/obstacles_laser/laser_sensor/sensor_frame" value="$(arg scan_frame)" />
     <param name="global_costmap/obstacles_laser/laser_sensor/topic" value="$(arg scan_topic)" />
-    <param name="global_costmap/robot_base_frame" value="$(arg base_frame)" />
+    <param name="global_costmap/robot_base_frame" value="$(arg scan_frame)" />
 
 
     <!-- Local planner -->
