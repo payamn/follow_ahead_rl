@@ -5,6 +5,9 @@ from datetime import datetime
 import copy
 import os, subprocess, time, signal
 
+#from cv_bridge import CvBridge
+
+
 import gym
 import math
 import random
@@ -24,11 +27,13 @@ from squaternion import quat2euler
 from squaternion import euler2quat
 
 from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import Image
 from gazebo_msgs.msg import ModelState
 from geometry_msgs.msg import Point
 from geometry_msgs.msg import Point32
 from geometry_msgs.msg import TransformStamped
 from rosgraph_msgs.msg import Clock
+
 from costmap_converter.msg import ObstacleArrayMsg
 from costmap_converter.msg import ObstacleMsg
 from gazebo_msgs.msg import ModelStates
@@ -55,13 +60,13 @@ logger = logging.getLogger(__name__)
 
 
 class History():
-    def __init__(self, memory_size, window_size, update_rate, save_rate=100):
-        self.data = [None for x in range(memory_size)]
+    def __init__(self, memory_size, window_size, update_rate, save_rate=10):
         self.idx = 0
         self.update_rate = update_rate
         self.save_rate = save_rate
         self.lock = threading.Lock()
-        self.memory_size = memory_size
+        self.memory_size = int(math.ceil(save_rate/update_rate*window_size))
+        self.data = [None for x in range(self.memory_size)]
         self.prev_add_time = rospy.Time.now().to_sec() - 1
         self.window_size = window_size
         self.avg_frame_rate = None
@@ -98,8 +103,8 @@ class History():
         skip_frames = -int(math.ceil(self.avg_frame_rate / self.update_rate))
         with self.lock:
             index = self.idx #(self.idx - 1)% self.window_size
-            if self.window_size * skip_frames >= self.memory_size:
-                print("error in get element memory not enough")
+            if self.window_size * abs(skip_frames) >= self.memory_size:
+                rospy.logerr("error in get element memory not enough")
             for i in range (self.window_size):
                 return_data.append(self.data[index])
                 index = (index + skip_frames) % self.window_size
@@ -122,7 +127,7 @@ class Robot():
         self.agent_num = agent_num
         self.init_node = True
         self.deleted = False
-        self.update_rate_states = 5
+        self.update_rate_states = 0.05
         self.current_vel_ = Twist()
         self.goal = {"pos": None, "orientation": None}
         self.use_goal = True
@@ -146,9 +151,9 @@ class Robot():
 
         self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
-        self.pos_history = History(200, 10, self.update_rate_states)
-        self.orientation_history = History(200, 10, self.update_rate_states)
-        self.velocity_history = History(200, 10, self.update_rate_states)
+        self.pos_history = History(200, 4, self.update_rate_states)
+        self.orientation_history = History(200, 4, self.update_rate_states)
+        self.velocity_history = History(200, 4, self.update_rate_states)
         self.is_collided = False
         self.is_pause = False
         self.reset = False
@@ -181,7 +186,7 @@ class Robot():
        # Sends the move_base_goal to the action server.
         self.action_client_.send_goal(move_base_goal)
        # Waits for the server to finish performing the action.
-        wait = self.action_client_.wait_for_result(rospy.rostime.Duration(0.4))
+       #wait = self.action_client_.wait_for_result(rospy.rostime.Duration(0.4))
        # If the result doesn't arrive, assume the Server is not available
         # if not wait:
         #     rospy.logerr("Action server not available!")
@@ -231,9 +236,9 @@ class Robot():
         self.goal = {"pos": None, "orientation": None}
         self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
-        self.pos_history = History(200, 10, self.update_rate_states)
-        self.orientation_history = History(200, 10, self.update_rate_states)
-        self.velocity_history = History(200, 10, self.update_rate_states)
+        self.pos_history = History(200, 4, self.update_rate_states)
+        self.orientation_history = History(200, 4, self.update_rate_states)
+        self.velocity_history = History(200, 4, self.update_rate_states)
         self.velocity_history.add_element((0,0))
         self.pos_history.add_element((init_pose["pos"][0],init_pose["pos"][1]))
         self.orientation_history.add_element(init_pose["orientation"])
@@ -281,7 +286,6 @@ class Robot():
             self.goal["pos"] = pos_global
             self.goal["orientation"] = orientaion_global
             self.movebase_client_goal(pos_global, orientaion_global)
-            rospy.loginfo(pos_global)
         else:
             linear_vel = max(min((1+action[0])/2., self.max_linear_vel), 0)
             angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
@@ -291,6 +295,7 @@ class Robot():
             cmd_vel.angular.z = -float(self.current_vel_.angular.z - (self.current_vel_.angular.z - angular_vel)*0.9)
             self.current_vel_ = cmd_vel
             self.cmd_vel_pub.publish(cmd_vel)
+
 
     def stop_robot(self):
         self.cmd_vel_pub.publish(Twist())
@@ -453,6 +458,10 @@ class GazeborosEnv(gym.Env):
 
         self.is_evaluation_ = is_evaluation
 
+        # self.bridge = CvBridge()
+        # self.image_pub = rospy.Publisher("image_observation", Image)
+        # self.image_pub_gt = rospy.Publisher("image_observation_gt", Image)
+
         self.is_reseting = True
         self.use_path = False
         self.lock = _thread.allocate_lock()
@@ -473,10 +482,10 @@ class GazeborosEnv(gym.Env):
         self.action_mode_ = "point"
 
         self.test_simulation_ = False
+
+
+        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(24,))
         self.current_obsevation_image_ = np.zeros([2000,2000,3])
-
-
-        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(48,))
         self.current_obsevation_image_.fill(255)
 
         self.prev_action = (0, 0, 0)
@@ -913,6 +922,8 @@ class GazeborosEnv(gym.Env):
 
         return (images.reshape((images.shape[1], images.shape[2], images.shape[0])))
 
+
+
     def get_observation(self):
         # got_laser = False
         # while not got_laser:
@@ -939,7 +950,6 @@ class GazeborosEnv(gym.Env):
             pos_rel.append(relative)
         pos_history = np.asarray(np.asarray(pos_rel)).flatten()/6.0
         #heading_history = np.asarray(self.robot.get_relative_orientation())/math.pi
-        # self.visualize_observation(poses, headings, self.get_laser_scan())
         #orientation_position = np.append(pose_history, heading_history)
         #TODO: make the velocity normalization better
         velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))/self.robot.max_angular_vel
@@ -952,31 +962,73 @@ class GazeborosEnv(gym.Env):
         # todo
         return
 
+    def visualize_observation(self):
+        observation_image = np.zeros([2000,2000,3])
+        observation_image_gt = np.zeros([2000,2000,3])
+        observation_image = observation_image.astype(np.uint8)
+        observation_image_gt = observation_image_gt.astype(np.uint8)
+        observation_image.fill(255)
+        observation_image_gt.fill(255)
+        while self.robot.pos_history.avg_frame_rate is None or self.person.pos_history.avg_frame_rate is None or self.robot.velocity_history.avg_frame_rate is None or self.person.velocity_history.avg_frame_rate is None:
+            if self.is_reseting:
+                return None
+            time.sleep(0.001)
+        pos_his_robot = self.robot.pos_history.get_elemets()
+        heading_robot = self.robot.state_["orientation"]
+
+        pos_his_person = self.person.pos_history.get_elemets()
+        heading_person = self.person.state_["orientation"]
+
+        heading_relative = GazeborosEnv.wrap_pi_to_pi(heading_robot-heading_person)/(math.pi)
+        center_pos = pos_his_robot[-1]
+        for pos in pos_his_robot:
+            relative = GazeborosEnv.get_relative_position(pos, self.robot)
+            pos_rel = GazeborosEnv.to_image_coordinate(relative, (0, 0))
+            pos_gt = GazeborosEnv.to_image_coordinate(pos, center_pos)
+            observation_image = self.add_circle_observation_to_image(relative, (255, 0, 0), 10, center_pos=(0,0), image=observation_image)
+            observation_image_gt = self.add_circle_observation_to_image(pos, (255, 0, 0), 10, center_pos=center_pos, image=observation_image_gt)
+
+        for pos in pos_his_person:
+            relative = GazeborosEnv.get_relative_position(pos, self.robot)
+            pos_rel = GazeborosEnv.to_image_coordinate(relative, (0, 0))
+            pos_gt = GazeborosEnv.to_image_coordinate(pos, center_pos)
+            observation_image = self.add_circle_observation_to_image(relative, (0, 255, 0), 10, image = observation_image, center_pos=(0,0))
+            observation_image_gt = self.add_circle_observation_to_image(pos, (0, 255, 0), 10, image=observation_image_gt, center_pos=center_pos)
+
+        self.image_pub.publish(self.bridge.cv2_to_imgmsg(observation_image, encoding="bgr8"))
+        self.image_pub_gt.publish(self.bridge.cv2_to_imgmsg(observation_image_gt, encoding="bgr8"))
+
+
+    @staticmethod
+    def to_image_coordinate(pos, center_pos):
+        return (int((pos[0] - center_pos[0])*50+1000), int((pos[1] - center_pos[1])*50+1000))
+
     def add_line_observation_to_image(self, pos, pos2, color):
-        to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
-        pos_image = to_image_fun(pos)
-        pos_image2 = to_image_fun(pos2)
+        pos_image = GazeborosEnv.to_image_coordinate(pos, self.center_pos_)
+        pos_image2 = GazeborosEnv.to_image_coordinate(pos2, self.center_pos_)
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             rospy.logerr("problem with observation: {}".format(pos_image))
             return
         self.new_obsevation_image_ = cv.line(self.new_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 1)
 
     def add_arrow_observation_to_image(self, pos, orientation, color):
-        to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
-        pos_image = to_image_fun(pos)
-        pos_image2 = to_image_fun((pos[0]+math.cos(orientation)*0.5, pos[1]+math.sin(orientation)*0.5))
+        pos_image = GazeborosEnv.to_image_coordinate(pos, self.center_pos_)
+        pos_image2 = GazeborosEnv.to_image_coordinate((pos[0]+math.cos(orientation)*0.5, pos[1]+math.sin(orientation)*0.5), self.center_pos_)
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             rospy.logerr("problem with observation: {}".format(pos_image))
             return
         self.new_obsevation_image_ = cv.arrowedLine(self.new_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 3)
 
-    def add_circle_observation_to_image(self, pos, color, radious):
-        to_image_fun = lambda x: (int((x[0] - self.center_pos_[0])*50+1000), int((x[1] - self.center_pos_[1])*50+1000))
-        pos_image = to_image_fun(pos)
+    def add_circle_observation_to_image(self, pos, color, radious, center_pos=None, image=None):
+        if image is None:
+            image = self.new_obsevation_image_
+        if center_pos is None:
+            center_pos = self.center_pos_
+        pos_image = GazeborosEnv.to_image_coordinate(pos, center_pos)
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             rospy.logerr("problem with observation: {}".format(pos_image))
             return
-        self.new_obsevation_image_ = cv.circle(self.new_obsevation_image_, (pos_image[0], pos_image[1]), radious, color, -1)
+        return (cv.circle(image , (pos_image[0], pos_image[1]), radious, color, -1))
 
     def darken_all_colors(self):
         darken_fun = lambda x: [max(y-1, 100) for y in x]
@@ -1010,12 +1062,12 @@ class GazeborosEnv(gym.Env):
             rospy.logerr("person or robot orientation is None")
             return
         if self.first_call_observation:
-            self.add_circle_observation_to_image(robot_pos, [152,100,100], 10)
-            self.add_circle_observation_to_image(person_pos,[0,100,100], 10)
+            self.new_obsevation_image_ = self.add_circle_observation_to_image(robot_pos, [152,100,100], 10)
+            self.new_obsevation_image_ = self.add_circle_observation_to_image(person_pos,[0,100,100], 10)
             self.first_call_observation = False
         if self.is_collided():
-            self.add_circle_observation_to_image(robot_pos, [152,200,200], 10)
-            self.add_circle_observation_to_image(person_pos,[200,100,100], 10)
+            self.new_obsevation_image_ = self.add_circle_observation_to_image(robot_pos, [152,200,200], 10)
+            self.new_obsevation_image_ = self.add_circle_observation_to_image(person_pos,[200,100,100], 10)
         self.add_arrow_observation_to_image(robot_pos, robot_orientation, self.robot_color)
         self.add_arrow_observation_to_image(person_pos, person_orientation, self.person_color)
         self.add_arrow_observation_to_image(current_goal["pos"], current_goal["orientation"], self.goal_color)
@@ -1047,7 +1099,7 @@ class GazeborosEnv(gym.Env):
         self.take_action(action)
         # instead of one reward get all the reward during wait
         # rospy.sleep(0.4)
-        sleep_time = 0.2
+        sleep_time = 0.1
         rewards = []
         for t in range (100):
             rospy.sleep(sleep_time/100.)
@@ -1078,7 +1130,8 @@ class GazeborosEnv(gym.Env):
             episode_over = True
             rospy.loginfo('fallen')
         reward = min(max(reward, -1), 1)
-        rospy.loginfo("action {} reward {}".format(action, reward))
+        if self.agent_num == 0:
+            rospy.loginfo("action {} reward {}".format(action, reward))
         #reward += 1
         return ob, reward, episode_over, {}
 
@@ -1192,7 +1245,9 @@ def test():
     while (True):
         action = gazeboros_env.get_supervised_action()
         gazeboros_env.step(action)
-        time.sleep(0.1)
+        gazeboros_env.get_observation()
+        #gazeboros_env.visualize_observation()
+        time.sleep(0.01)
 
 
 #test()
