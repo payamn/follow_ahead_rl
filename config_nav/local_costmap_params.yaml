@@ -13,5 +13,5 @@ local_costmap:
   footprint_clearing_enabled: false
   track_unknown_space: false
   plugins:
-    - {name: inflation,                 type: "costmap_2d::InflationLayer"}
     - {name: obstacles_laser,           type: "costmap_2d::ObstacleLayer"}
+    - {name: inflation,                 type: "costmap_2d::InflationLayer"}

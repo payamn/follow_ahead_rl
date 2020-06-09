@@ -56,7 +56,7 @@ RANDOMSEED = 2  # random seed
 PROJECT_NAME = "ppo_v_0.2_2layerV"  # Project name for loging
 
 EP_MAX = 10000  # total number of episodes for training
-EP_LEN = 30  # total number of steps for each episode
+EP_LEN = 15  # total number of steps for each episode
 GAMMA = 0.95  # reward discount
 A_LR = 0.0001  # learning rate for actor
 C_LR = 0.0002  # learning rate for critic
@@ -98,12 +98,12 @@ class ValueNetwork(nn.Module):
         self.linear4 = nn.Linear(hidden_dim, 1)
         # weights initialization
         self.linear1.weight.data.uniform_(-init_w, init_w)
-        self.linear2.weight.data.uniform_(-init_w, init_w)
+        #self.linear2.weight.data.uniform_(-init_w, init_w)
         self.linear4.bias.data.uniform_(-init_w, init_w)
 
     def forward(self, state):
         x = F.leaky_relu(self.linear1(state))
-        x = F.relu(self.linear2(x))
+        #x = F.relu(self.linear2(x))
         # x = F.relu(self.linear3(x))
         x = self.linear4(x)
         return x

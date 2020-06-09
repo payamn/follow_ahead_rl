@@ -6,7 +6,6 @@ import copy
 import os, subprocess, time, signal
 
 import gym
-
 import math
 import random
 # u
@@ -1068,13 +1067,16 @@ class GazeborosEnv(gym.Env):
             rospy.loginfo('collision happened episode over')
             reward -= 0.5
         elif distance > 5:
+            self.update_observation_image()
             episode_over = True
             rospy.loginfo('max distance happened episode over')
         elif self.number_of_steps > self.max_numb_steps:
+            self.update_observation_image()
             episode_over = True
             rospy.loginfo('max number of steps episode over')
         if self.fallen:
             episode_over = True
+            rospy.loginfo('fallen')
         reward = min(max(reward, -1), 1)
         rospy.loginfo("action {} reward {}".format(action, reward))
         #reward += 1

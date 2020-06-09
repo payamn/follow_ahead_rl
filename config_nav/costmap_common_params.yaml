@@ -1,7 +1,7 @@
 #footprint: [[-0.34, -0.34], [-0.34, 0.34], [0.34, 0.34], [0.34, -0.34]]
 #footprint: [[0.36, 0.13], [0.20, 0.13], [0.08, 0.23], [0.08, 0.39], [-0.08, 0.39], [-0.08, 0.23], [-0.20, 0.13], [-0.36, 0.13], [-0.36, -0.13], [-0.20, -0.13], [-0.08, -0.23], [-0.08, -0.39], [0.08, -0.39], [0.08, -0.23], [0.20, -0.13], [0.36, -0.13]]
 #footprint: [[0.30,0.12],[0.2,0.10],[0.08,0.21],[-0.08,0.21],[-0.2,0.10],[-0.36,0.10],[-0.36,-0.10],[-0.2,-0.10],[-0.08,-0.21],[0.08,-0.21],[0.2,-0.10],[0.30,-0.10]]
-footprint: [[0.15,0.150], [0.15,-0.150], [-0.15,-0.150], [-0.15,0.150]]
+footprint: [[0.30,0.300], [0.30,-0.300], [-0.30,-0.300], [-0.30,0.300]]
 footprint_padding: 0.05
 inflation_radius: 0.1
 always_send_full_costmap: true
@@ -11,7 +11,7 @@ map_type: costmap
 
 # inflation_layer:
 #   inflation_radius: 0.3 # 2xfootprint, it helps to keep the global planned path farther from obstacles
-transform_tolerance: 0.2
+transform_tolerance: 0.1
 
 
 # NavfnROS:
@@ -34,7 +34,7 @@ transform_tolerance: 0.2
 #   subscribe_to_updates: true
 #
 inflation:
-    inflation_radius: 0.1
+    inflation_radius: 0.3
     cost_scaling_factor: 10.0
     enabled: true
 
@@ -44,7 +44,6 @@ obstacles_laser:
     footprint_clearing_enabled: true
     combination_method: 1
     observation_sources: laser_sensor
-    inflation_radius: 0.2
     laser_sensor: {
       #      sensor_frame: $(arg sensor_frame),
       data_type: LaserScan,

@@ -6,7 +6,8 @@
 global_costmap:
   #global_frame: odom
   #robot_base_frame: turtlebot2/base_footprint
-  update_frequency: 5.0
+  update_frequency: 10.0
+  publish_frequency: 10.0
   origin_x: -100
   origin_y: -100
   width: 200

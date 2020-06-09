@@ -12,9 +12,9 @@
     <mu1>5</mu1>
     <mu2>5</mu2>
     <kp>500000.0</kp>
-    <kd>10.0</kd>
+    <kd>100.0</kd>
     <minDepth>0.001</minDepth>
-    <maxVel>1.1</maxVel>
+    <maxVel>10.1</maxVel>
     <fdir1>1 0 0</fdir1>
     <material>Gazebo/FlatBlack</material>
   </gazebo>
@@ -23,30 +23,30 @@
     <mu1>5</mu1>
     <mu2>5</mu2>
     <kp>500000.0</kp>
-    <kd>10.0</kd>
+    <kd>100.0</kd>
     <minDepth>0.001</minDepth>
-    <maxVel>1.1</maxVel>
+    <maxVel>10.1</maxVel>
     <fdir1>1 0 0</fdir1>
     <material>Gazebo/FlatBlack</material>
   </gazebo>
 
   <gazebo reference="caster_back_right_link">
-    <mu1>0.2</mu1>
-    <mu2>0.2</mu2>
+    <mu1>5</mu1>
+    <mu2>5</mu2>
     <kp>1000000.0</kp>
     <kd>100.0</kd>
     <minDepth>0.001</minDepth>
-    <maxVel>1.5</maxVel>
+    <maxVel>10.5</maxVel>
     <material>Gazebo/FlatBlack</material>
   </gazebo>
 
   <gazebo reference="caster_back_left_link">
-    <mu1>0.2</mu1>
-    <mu2>0.2</mu2>
+    <mu1>5</mu1>
+    <mu2>5</mu2>
     <kp>1000000.0</kp>
     <kd>100.0</kd>
     <minDepth>0.001</minDepth>
-    <maxVel>1.5</maxVel>
+    <maxVel>10.5</maxVel>
     <material>Gazebo/FlatBlack</material>
   </gazebo>
 
