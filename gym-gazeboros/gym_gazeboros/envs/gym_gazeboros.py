@@ -608,7 +608,7 @@ class GazeborosEnv(gym.Env):
             init_pos_robot = self.path["start_robot"]
         elif not self.use_path:
             init_pos_person = {"pos": (0, 0), "orientation": random.random()*2*math.pi - math.pi}
-            init_pos_robot = {"pos": self.find_random_point_in_circle(1.5, 1, init_pos_person["pos"]),\
+            init_pos_robot = {"pos": self.find_random_point_in_circle(2.5, 2, init_pos_person["pos"]),\
                               "orientation": random.random()*2*math.pi - math.pi}#self.calculate_angle_using_path(idx_start)}
         elif self.use_random_around_person_:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
@@ -636,7 +636,7 @@ class GazeborosEnv(gym.Env):
         set_model_msg.pose.orientation.z = quaternion_rotation[2]
         set_model_msg.pose.orientation.w = quaternion_rotation[0]
 
-        set_model_msg.pose.position.z = 2.63 * self.agent_num
+        set_model_msg.pose.position.z = 2.6 * self.agent_num + 0.099
         set_model_msg.pose.position.x = pose["pos"][0]
         set_model_msg.pose.position.y = pose["pos"][1]
         self.set_model_state_sp(set_model_msg)
@@ -1167,6 +1167,7 @@ class GazeborosEnv(gym.Env):
             rospy.loginfo("not init so run reset again")
             return (self.reset())
         else:
+            rospy.sleep(3)
             return self.get_observation()
 
     def render(self, mode='human', close=False):
