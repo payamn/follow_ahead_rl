@@ -617,8 +617,10 @@ class GazeborosEnv(gym.Env):
             init_pos_robot = self.path["start_robot"]
         elif not self.use_path:
             init_pos_person = {"pos": (0, 0), "orientation": random.random()*2*math.pi - math.pi}
-            init_pos_robot = {"pos": self.find_random_point_in_circle(2, 2.5, init_pos_person["pos"]),\
-                              "orientation": random.random()*2*math.pi - math.pi}#self.calculate_angle_using_path(idx_start)}
+            ahead_person = (init_pos_person['pos'][0] + math.cos(init_pos_person["orientation"]) * 2, init_pos_person['pos'][1] + math.sin(init_pos_person["orientation"]) * 2)
+#self.find_random_point_in_circle(2, 2.5, init_pos_person["pos"]),
+            init_pos_robot = {"pos": ahead_person,\
+                              "orientation": init_pos_person["orientation"]}#random.random()*2*math.pi - math.pi}#self.calculate_angle_using_path(idx_start)}
         elif self.use_random_around_person_:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
             init_pos_robot = {"pos": self.find_random_point_in_circle(1.5, 1, self.path["points"][idx_start]),\
@@ -666,6 +668,7 @@ class GazeborosEnv(gym.Env):
 
         self.current_obsevation_image_.fill(255)
         self.robot.movebase_cancel_goals()
+        rospy.sleep(0.5)
         self.person.stop_robot()
         self.robot.stop_robot()
         self.prev_action = (0, 0, 0)
@@ -844,6 +847,7 @@ class GazeborosEnv(gym.Env):
             counter += 1
         rospy.loginfo( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
         if self.lock.acquire(timeout=10):
+            rospy.sleep(3)
             rospy.loginfo("path follower got the lock")
             if self.test_simulation_:
                 mode_person = -1
@@ -1220,7 +1224,7 @@ class GazeborosEnv(gym.Env):
             rospy.loginfo("not init so run reset again")
             return (self.reset())
         else:
-            rospy.sleep(3)
+            rospy.sleep(2)
             return self.get_observation()
 
     def render(self, mode='human', close=False):
@@ -1242,12 +1246,18 @@ class GazeborosEnv(gym.Env):
 def test():
     gazeboros_env = GazeborosEnv()
     gazeboros_env.set_agent(0)
+    step = 0
     while (True):
+        step +=1
         action = gazeboros_env.get_supervised_action()
         gazeboros_env.step(action)
         gazeboros_env.get_observation()
+        if step % 30==0:
+            print("reseting")
+            gazeboros_env.reset()
+
         #gazeboros_env.visualize_observation()
         time.sleep(0.01)
 
 
-#test()
+test()
