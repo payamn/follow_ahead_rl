@@ -1142,7 +1142,7 @@ class GazeborosEnv(gym.Env):
     def is_collided(self):
         rel_person = GazeborosEnv.get_relative_heading_position(self.robot, self.person)[1]
         distance = math.hypot(rel_person[0], rel_person[1])
-        if distance < 0.15 or self.robot.is_collided:
+        if distance < 0.5 or self.robot.is_collided:
             return True
         return False
 
