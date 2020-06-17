@@ -53,23 +53,23 @@ args = parser.parse_args()
 
 ENV_NAME = 'gazeboros-v0'  # environment name
 RANDOMSEED = 2  # random seed
-PROJECT_NAME = "ppo_v_0.2_2layerV"  # Project name for loging
+PROJECT_NAME = "ppo_v_0.2_2cmd_vel"  # Project name for loging
 
-EP_MAX = 10000  # total number of episodes for training
-EP_LEN = 15  # total number of steps for each episode
+EP_MAX = 100000  # total number of episodes for training
+EP_LEN = 60  # total number of steps for each episode
 GAMMA = 0.95  # reward discount
 A_LR = 0.0001  # learning rate for actor
 C_LR = 0.0002  # learning rate for critic
-BATCH = 64  # update batchsize
-A_UPDATE_STEPS = 5  # actor update steps
-C_UPDATE_STEPS = 5  # critic update steps
+BATCH = 256  # update batchsize
+A_UPDATE_STEPS = 4  # actor update steps
+C_UPDATE_STEPS = 4  # critic update steps
 EPS = 1e-8   # numerical residual
 MODEL_PATH = 'model/ppo_multi'
 NUM_WORKERS = 4  # or: mp.cpu_count()
 ACTION_RANGE = 1.  # if unnormalized, normalized action range should be 1.
 METHOD = [
     dict(name='kl_pen', kl_target=0.01, lam=0.5),  # KL penalty
-    dict(name='clip', epsilon=0.2),  # Clipped surrogate objective, find this is better
+    dict(name='clip', epsilon=0.1),  # Clipped surrogate objective, find this is better
     ][1]  # choose the method for optimization
 ###############################  PPO  ####################################
 
@@ -98,12 +98,12 @@ class ValueNetwork(nn.Module):
         self.linear4 = nn.Linear(hidden_dim, 1)
         # weights initialization
         self.linear1.weight.data.uniform_(-init_w, init_w)
-        #self.linear2.weight.data.uniform_(-init_w, init_w)
+        self.linear2.weight.data.uniform_(-init_w, init_w)
         self.linear4.bias.data.uniform_(-init_w, init_w)
 
     def forward(self, state):
         x = F.leaky_relu(self.linear1(state))
-        #x = F.relu(self.linear2(x))
+        x = F.relu(self.linear2(x))
         # x = F.relu(self.linear3(x))
         x = self.linear4(x)
         return x
@@ -117,10 +117,10 @@ class PolicyNetwork(nn.Module):
 
         self.linear1 = nn.Linear(num_inputs, hidden_dim)
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
-        # self.linear3 = nn.Linear(hidden_dim, hidden_dim)
+        self.linear3 = nn.Linear(hidden_dim, hidden_dim//2)
         # self.linear4 = nn.Linear(hidden_dim, hidden_dim)
 
-        self.mean_linear = nn.Linear(hidden_dim, num_actions)
+        self.mean_linear = nn.Linear(hidden_dim//2, num_actions)
         # implementation 1
         # self.log_std_linear = nn.Linear(hidden_dim, num_actions)
         # # implementation 2: not dependent on latent features, reference:https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail/blob/master/a2c_ppo_acktr/distributions.py
@@ -133,7 +133,7 @@ class PolicyNetwork(nn.Module):
     def forward(self, state):
         x = F.leaky_relu(self.linear1(state))
         x = F.leaky_relu(self.linear2(x))
-        # x = F.relu(self.linear3(x))
+        x = F.relu(self.linear3(x))
         # x = F.relu(self.linear4(x))
 
         mean = self.action_range * F.tanh(self.mean_linear(x))
@@ -320,10 +320,14 @@ class PPO(object):
         s = torch.FloatTensor(s).to(device)
         return self.critic(s).squeeze(0).detach().cpu().numpy()
 
-    def save_model(self, path):
+    def save_model(self, path, model_step=None):
         torch.save(self.actor.state_dict(), path+'_actor')
         torch.save(self.critic.state_dict(), path+'_critic')
         torch.save(self.actor_old.state_dict(), path+'_actor_old')
+        if model_step is not None:
+            torch.save(self.actor.state_dict(), path+'_actor_{}'.format(model_step))
+            torch.save(self.critic.state_dict(), path+'_critic_{}'.format(model_step))
+            torch.save(self.actor_old.state_dict(), path+'_actor_old_{}'.format(model_step))
 
     def load_model(self, path, set_eval=False):
         self.actor.load_state_dict(torch.load(path+'_actor'))
@@ -416,7 +420,7 @@ def worker(id, ppo, rewards_queue):
         else:
             all_ep_r.append(all_ep_r[-1] * 0.9 + ep_r * 0.1)
         if ep%50==0:
-            ppo.save_model(MODEL_PATH)
+            ppo.save_model(MODEL_PATH, ep)
         print(
             'Episode: {}/{}  | Episode Reward: {:.4f}  | Running Time: {:.4f}'.format(
                 ep, EP_MAX, ep_r,
@@ -445,7 +449,7 @@ def main():
     state_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
 
-    ppo = PPO(state_dim, action_dim, hidden_dim=128)
+    ppo = PPO(state_dim, action_dim, hidden_dim=256)
     try:
         ppo.load_model(MODEL_PATH)
     except Exception as e:

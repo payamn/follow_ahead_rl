@@ -16,7 +16,6 @@ import numpy as np
 import cv2 as cv
 
 import rospy
-
 # Brings in the SimpleActionClient
 import actionlib
 # Brings in the .action file and messages used by the move base action
@@ -60,12 +59,12 @@ logger = logging.getLogger(__name__)
 
 
 class History():
-    def __init__(self, memory_size, window_size, update_rate, save_rate=10):
+    def __init__(self, window_size, update_rate, save_rate=10):
         self.idx = 0
         self.update_rate = update_rate
         self.save_rate = save_rate
         self.lock = threading.Lock()
-        self.memory_size = int(math.ceil(save_rate/update_rate*window_size))
+        self.memory_size = int(math.ceil(save_rate/update_rate*window_size)+1)
         self.data = [None for x in range(self.memory_size)]
         self.prev_add_time = rospy.Time.now().to_sec() - 1
         self.window_size = window_size
@@ -104,7 +103,7 @@ class History():
         with self.lock:
             index = self.idx #(self.idx - 1)% self.window_size
             if self.window_size * abs(skip_frames) >= self.memory_size:
-                rospy.logerr("error in get element memory not enough")
+                rospy.logerr("error in get element memory not enough update rate{} avg_frame_rate{} mem_size {} skipf: {}".format(self.update_rate, self.avg_frame_rate, self.memory_size, skip_frames))
             for i in range (self.window_size):
                 return_data.append(self.data[index])
                 index = (index + skip_frames) % self.window_size
@@ -127,8 +126,8 @@ class Robot():
         self.agent_num = agent_num
         self.init_node = True
         self.deleted = False
-        self.update_rate_states = 0.75
-        self.window_size_history = 5
+        self.update_rate_states = 2.0
+        self.window_size_history = 10
         self.current_vel_ = Twist()
         self.goal = {"pos": None, "orientation": None}
         self.use_goal = use_goal
@@ -152,9 +151,9 @@ class Robot():
 
         self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
-        self.pos_history = History(200, self.window_size_history, self.update_rate_states)
-        self.orientation_history = History(200, self.window_size_history, self.update_rate_states)
-        self.velocity_history = History(200, self.window_size_history, self.update_rate_states)
+        self.pos_history = History(self.window_size_history, self.update_rate_states)
+        self.orientation_history = History(self.window_size_history, self.update_rate_states)
+        self.velocity_history = History(self.window_size_history, self.update_rate_states)
         self.is_collided = False
         self.is_pause = False
         self.reset = False
@@ -237,9 +236,9 @@ class Robot():
         self.goal = {"pos": None, "orientation": None}
         self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
         self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
-        self.pos_history = History(200, self.window_size_history, self.update_rate_states)
-        self.orientation_history = History(200, self.window_size_history, self.update_rate_states)
-        self.velocity_history = History(200, self.window_size_history, self.update_rate_states)
+        self.pos_history = History(self.window_size_history, self.update_rate_states)
+        self.orientation_history = History(self.window_size_history, self.update_rate_states)
+        self.velocity_history = History(self.window_size_history, self.update_rate_states)
         self.velocity_history.add_element((0,0))
         self.pos_history.add_element((init_pose["pos"][0],init_pose["pos"][1]))
         self.orientation_history.add_element(init_pose["orientation"])
@@ -331,26 +330,26 @@ class Robot():
             linear_vel = 0
             if person_mode == 1:
                 linear_vel = self.max_linear_vel/4
-                angular_vel = self.max_angular_vel/2
+                angular_vel = self.max_angular_vel/6
             elif person_mode == 2:
                 linear_vel = self.max_linear_vel/4
-                angular_vel = -self.max_angular_vel
+                angular_vel = -self.max_angular_vel/7
             elif person_mode == 3:
                 linear_vel = self.max_linear_vel/2
-                angular_vel = -self.max_angular_vel/2
+                angular_vel = -self.max_angular_vel/12
             elif person_mode == 4:
                 linear_vel = self.max_linear_vel * random.random()
                 angular_vel = 0
             elif person_mode == 5:
-                linear_vel = self.max_linear_vel/4
-                angular_vel = self.max_angular_vel
+                linear_vel = self.max_linear_vel/2
+                angular_vel = self.max_angular_vel/10
             elif person_mode == 6:
                 linear_vel, angular_vel = self.get_velocity()
                 linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
                 angular_vel = angular_vel - (angular_vel - (random.random()-0.5)*2)/2.
             elif person_mode == 7:
-                linear_vel = self.max_angular_vel/3
-                angular_vel = -self.max_angular_vel
+                linear_vel = self.max_linear_vel/3
+                angular_vel = -self.max_angular_vel/6
             angular_vel += random.uniform(-self.max_angular_vel/4, self.max_angular_vel/4)
             linear_vel += random.uniform(self.max_linear_vel/4, self.max_linear_vel/4)
             self.publish_cmd_vel(linear_vel, angular_vel)
@@ -483,7 +482,7 @@ class GazeborosEnv(gym.Env):
 
         self.test_simulation_ = False
 
-        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(27,))
+        self.observation_space = gym.spaces.Box(low=-1, high=1, shape=(47,))
         self.current_obsevation_image_ = np.zeros([2000,2000,3])
         self.current_obsevation_image_.fill(255)
 
@@ -596,7 +595,7 @@ class GazeborosEnv(gym.Env):
     def create_robots(self):
 
         self.person = Robot('person_{}'.format(self.agent_num),
-                            max_angular_speed=2, max_linear_speed=.7, agent_num=self.agent_num)
+                            max_angular_speed=1, max_linear_speed=.4, agent_num=self.agent_num)
 
         self.robot = Robot('tb3_{}'.format(self.agent_num),
                             max_angular_speed=3.0, max_linear_speed=1.2, relative=self.person, agent_num=self.agent_num, use_goal=self.use_goal)
@@ -622,8 +621,8 @@ class GazeborosEnv(gym.Env):
         elif not self.use_path:
             init_pos_person = {"pos": (0, 0), "orientation": random.random()*2*math.pi - math.pi}
             ahead_person = (init_pos_person['pos'][0] + math.cos(init_pos_person["orientation"]) * 2, init_pos_person['pos'][1] + math.sin(init_pos_person["orientation"]) * 2)
-#self.find_random_point_in_circle(2, 2.5, init_pos_person["pos"]),
-            init_pos_robot = {"pos": ahead_person,\
+            random_pos_robot = self.find_random_point_in_circle(1.5, 2.5, init_pos_person["pos"])
+            init_pos_robot = {"pos": random_pos_robot,\
                               "orientation": init_pos_person["orientation"]}#random.random()*2*math.pi - math.pi}#self.calculate_angle_using_path(idx_start)}
         elif self.use_random_around_person_:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
@@ -865,7 +864,16 @@ class GazeborosEnv(gym.Env):
             elif self.is_evaluation_:
                 mode_person = 2
             else:
-                mode_person = 6#random.randint(1, self.max_mod_person_)
+                if self.agent_num == 0:
+                    mode_person = 5
+                elif self.agent_num == 1:
+                    mode_person = 2
+                elif self.agent_num == 2:
+                    mode_person = 3
+                elif self.agent_num == 3:
+                    mode_person = 7
+                else:
+                    mode_person = random.randint(1, self.max_mod_person_)
             # if mode_person == 0:
             #     person_thread = threading.Thread(target=self.person.go_to_goal, args=())
             #     person_thread.start()
@@ -1110,7 +1118,7 @@ class GazeborosEnv(gym.Env):
         self.robot.take_action(action)
         if self.wait_observation_ <= 0:
             self.update_observation_image()
-            self.wait_observation_ = 0
+            self.wait_observation_ = 5
         self.wait_observation_ -= 1
         return
 
@@ -1119,7 +1127,7 @@ class GazeborosEnv(gym.Env):
         self.take_action(action)
         # instead of one reward get all the reward during wait
         # rospy.sleep(0.4)
-        sleep_time = 0.05
+        sleep_time = 0.15
         rewards = []
         if sleep_time > 0.1:
             for t in range (10):
