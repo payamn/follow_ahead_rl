@@ -121,6 +121,8 @@ class Robot():
         self.init_node = False
         self.alive = True
         self.prev_call_gazeboros_ = None
+        if relative is None:
+            relative = self
         self.relative = relative
         self.log_history = []
         self.agent_num = agent_num
@@ -597,8 +599,12 @@ class GazeborosEnv(gym.Env):
         self.person = Robot('person_{}'.format(self.agent_num),
                             max_angular_speed=1, max_linear_speed=.4, agent_num=self.agent_num)
 
+        relative = None
+
+        if self.use_goal:
+            relative = self.person
         self.robot = Robot('tb3_{}'.format(self.agent_num),
-                            max_angular_speed=3.0, max_linear_speed=1.2, relative=self.person, agent_num=self.agent_num, use_goal=self.use_goal)
+                            max_angular_speed=2, max_linear_speed=1, relative=relative, agent_num=self.agent_num, use_goal=self.use_goal)
 
     def find_random_point_in_circle(self, radious, min_distance, around_point):
         max_r = 2
