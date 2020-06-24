@@ -116,7 +116,7 @@ class History():
 
 
 class Robot():
-    def __init__(self, name, max_angular_speed=1, max_linear_speed=1, relative=None, agent_num=None, use_goal=False, use_jackal=False):
+    def __init__(self, name, max_angular_speed=1, max_linear_speed=1, relative=None, agent_num=None, use_goal=False, use_movebase=False, use_jackal=False):
         self.name = name
         self.use_jackal = use_jackal
         self.init_node = False
@@ -134,6 +134,7 @@ class Robot():
         self.current_vel_ = Twist()
         self.goal = {"pos": None, "orientation": None}
         self.use_goal = use_goal
+        self.use_movebase = use_movebase
         self.collision_distance = 0.5
         self.max_angular_vel = max_angular_speed
         self.max_linear_vel = max_linear_speed
@@ -147,7 +148,7 @@ class Robot():
         else:
             self.cmd_vel_pub =  rospy.Publisher('/{}/cmd_vel'.format(name), Twist, queue_size=1)
 
-        if "tb3" in self.name and self.use_goal:
+        if "tb3" in self.name and self.use_movebase:
             # Create an action client called "move_base" with action definition file "MoveBaseAction"
             self.action_client_ = actionlib.SimpleActionClient('/move_base_{}'.format(self.agent_num),MoveBaseAction)
             # Waits until the action server has started up and started listening for goals.
@@ -155,8 +156,12 @@ class Robot():
         else:
             self.action_client_ = None
 
-        self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
-        self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
+        if "person" is self.name:
+            self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
+            self.linear_pid = PID(1.0, 0, 0.05, setpoint=0)
+        else:
+            self.angular_pid = PID(2.5, 0, 0.03, setpoint=0)
+            self.linear_pid = PID(2.5, 0, 0.05, setpoint=0)
         self.pos_history = History(self.window_size_history, self.update_rate_states)
         self.orientation_history = History(self.window_size_history, self.update_rate_states)
         self.velocity_history = History(self.window_size_history, self.update_rate_states)
@@ -240,8 +245,12 @@ class Robot():
     def update(self, init_pose):
         self.alive = True
         self.goal = {"pos": None, "orientation": None}
-        self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
-        self.linear_pid = PID(1.5, 0, 0.05, setpoint=0)
+        if "person" is self.name:
+            self.angular_pid = PID(0.5, 0, 0.03, setpoint=0)
+            self.linear_pid = PID(1.0, 0, 0.05, setpoint=0)
+        else:
+            self.angular_pid = PID(2.5, 0, 0.03, setpoint=0)
+            self.linear_pid = PID(2.5, 0, 0.05, setpoint=0)
         self.pos_history = History(self.window_size_history, self.update_rate_states)
         self.orientation_history = History(self.window_size_history, self.update_rate_states)
         self.velocity_history = History(self.window_size_history, self.update_rate_states)
@@ -285,13 +294,17 @@ class Robot():
             return
 
         if self.use_goal:
-            #TODO: add actionlib
             pos = GazeborosEnv.denormalize(action[0:2], self.max_rel_pos_range)
-            orientation = GazeborosEnv.denormalize(action[2], math.pi)
-            pos_global, orientaion_global = GazeborosEnv.get_global_position(pos, orientation, self.relative)
-            self.goal["pos"] = pos_global
-            self.goal["orientation"] = orientaion_global
-            self.movebase_client_goal(pos_global, orientaion_global)
+            if self.use_movebase:
+                orientation = GazeborosEnv.denormalize(action[2], math.pi)
+                pos_global, orientaion_global = GazeborosEnv.get_global_position_orientation(pos, orientation, self.relative)
+                self.goal["pos"] = pos_global
+                self.goal["orientation"] = orientaion_global
+                self.movebase_client_goal(pos_global, orientaion_global)
+            else:
+                pos_global = GazeborosEnv.get_global_position(pos, self.relative)
+                #relative_robot = GazeborosEnv.get_relative_position(pos_global, self)
+                self.goal["pos"] = pos_global
         else:
             linear_vel = max(min(action[0], self.max_linear_vel), -self.max_linear_vel)
             angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
@@ -335,20 +348,20 @@ class Robot():
             angular_vel = 0
             linear_vel = 0
             if person_mode == 1:
-                linear_vel = self.max_linear_vel/4
+                linear_vel = self.max_linear_vel/2
                 angular_vel = self.max_angular_vel/6
             elif person_mode == 2:
                 linear_vel = self.max_linear_vel/4
                 angular_vel = -self.max_angular_vel/7
             elif person_mode == 3:
-                linear_vel = self.max_linear_vel/2
-                angular_vel = -self.max_angular_vel/12
+                linear_vel = self.max_linear_vel
+                angular_vel = -self.max_angular_vel/3
             elif person_mode == 4:
                 linear_vel = self.max_linear_vel * random.random()
                 angular_vel = 0
             elif person_mode == 5:
-                linear_vel = self.max_linear_vel/2
-                angular_vel = self.max_angular_vel/10
+                linear_vel = self.max_linear_vel
+                angular_vel = self.max_angular_vel/2
             elif person_mode == 6:
                 linear_vel, angular_vel = self.get_velocity()
                 linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
@@ -386,7 +399,7 @@ class Robot():
 
                 angular_vel = -min(max(self.angular_pid(diff_angle), -self.max_angular_vel),self.max_angular_vel)
                 linear_vel = min(max(self.linear_pid(-distance), 0), self.max_linear_vel)
-                linear_vel = linear_vel * math.pow((abs(math.pi - abs(diff_angle))/math.pi), 2)
+                linear_vel = linear_vel * math.pow((abs(math.pi - abs(diff_angle))/math.pi), 1.5)
 
                 self.publish_cmd_vel(linear_vel, angular_vel)
                 time.sleep(0.01)
@@ -438,6 +451,11 @@ class Robot():
             counter_problem += 1
             if counter_problem > 200:
                 raise Exception('Probable shared memory issue happend')
+        # if not self.use_movebase:
+        #     pos = GazeborosEnv.get_global_position(self.goal["pos"], self)
+        #     goal = {"pos":pos, "orientation":None}
+        # else:
+        #     goal = self.goal
 
         return self.goal
 
@@ -473,8 +491,10 @@ class GazeborosEnv(gym.Env):
         self.use_path = False
         self.use_jackal = True
         self.lock = _thread.allocate_lock()
+
+        self.use_goal = True
         self.robot_mode = 0
-        self.use_goal = False
+        self.use_movebase = False
         self.use_reachability = False
 
         self.fallen = False
@@ -495,7 +515,7 @@ class GazeborosEnv(gym.Env):
         self.current_obsevation_image_ = np.zeros([2000,2000,3])
         self.current_obsevation_image_.fill(255)
 
-        if self.use_goal:
+        if self.use_movebase:
             self.prev_action = (0, 0, 0)
             self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0, -1.0]), high=np.array([1.0, 1.0, 1.0]), dtype=np.float32)
         else:
@@ -608,14 +628,14 @@ class GazeborosEnv(gym.Env):
     def create_robots(self):
 
         self.person = Robot('person_{}'.format(self.agent_num),
-                            max_angular_speed=1, max_linear_speed=.4, agent_num=self.agent_num)
+                            max_angular_speed=1, max_linear_speed=.6, agent_num=self.agent_num)
 
         relative = None
 
         if self.use_goal:
             relative = self.person
         self.robot = Robot('tb3_{}'.format(self.agent_num),
-                            max_angular_speed=1.8, max_linear_speed=1.2, relative=relative, agent_num=self.agent_num, use_goal=self.use_goal, use_jackal=self.use_jackal)
+                            max_angular_speed=1.8, max_linear_speed=1.2, relative=relative, agent_num=self.agent_num, use_goal=self.use_goal, use_movebase=self.use_movebase ,use_jackal=self.use_jackal)
 
     def find_random_point_in_circle(self, radious, min_distance, around_point):
         max_r = 2
@@ -659,7 +679,7 @@ class GazeborosEnv(gym.Env):
     def set_pos(self, name, pose):
         set_model_msg = ModelState()
         set_model_msg.model_name = name
-        if self.use_goal:
+        if self.use_movebase:
             self.prev_action = (0,0, 0)
         else:
             self.prev_action = (0,0)
@@ -693,12 +713,12 @@ class GazeborosEnv(gym.Env):
         self.first_call_observation = True
 
         self.current_obsevation_image_.fill(255)
-        if self.use_goal:
+        if self.use_movebase:
             self.robot.movebase_cancel_goals()
         rospy.sleep(0.5)
         self.person.stop_robot()
         self.robot.stop_robot()
-        if self.use_goal:
+        if self.use_movebase:
             self.prev_action = (0,0, 0)
         else:
             self.prev_action = (0,0)
@@ -762,7 +782,29 @@ class GazeborosEnv(gym.Env):
         return norm_val
 
     @staticmethod
-    def get_global_position(pos_goal, orientation_goal, center):
+    def get_global_position(pos_goal, center):
+        while not center.is_current_state_ready():
+            if center.reset:
+                rospy.logwarn("reseting so return none in rel pos rel: {} center".format(relative.is_current_state_ready(), center.is_current_state_ready()))
+                return (None, None)
+            time.sleep(0.01)
+            rospy.logwarn ("waiting for observation to be ready")
+        #relative_orientation = relative.state_['orientation']
+        center_pos = np.asarray(center.state_['position'])
+        center_orientation = center.state_['orientation']
+
+        #pos = [x * 5 for x in pos_goal]
+
+        relative_pos = np.asarray(pos_goal)
+
+        # transform the relative to center coordinat
+        rotation_matrix = np.asarray([[np.cos(center_orientation), np.sin(center_orientation)], [-np.sin(center_orientation), np.cos(center_orientation)]])
+        relative_pos = np.matmul(relative_pos, rotation_matrix)
+        global_pos = np.asarray(relative_pos + center_pos)
+        return global_pos
+
+    @staticmethod
+    def get_global_position_orientation(pos_goal, orientation_goal, center):
         while not center.is_current_state_ready():
             if center.reset:
                 rospy.logwarn("reseting so return none in rel pos rel: {} center".format(relative.is_current_state_ready(), center.is_current_state_ready()))
@@ -883,27 +925,28 @@ class GazeborosEnv(gym.Env):
             counter += 1
         rospy.loginfo( "path follower waiting for lock pause:{} reset:{}".format(self.is_pause, self.is_reseting))
         if self.lock.acquire(timeout=10):
-            rospy.sleep(3)
+            rospy.sleep(1.5)
             rospy.loginfo("path follower got the lock")
             if self.test_simulation_:
                 mode_person = -1
             elif self.is_evaluation_:
                 mode_person = 2
             else:
-                if self.agent_num == 0:
-                    mode_person = 5
-                elif self.agent_num == 1:
-                    mode_person = 2
-                elif self.agent_num == 2:
-                    mode_person = 3
-                elif self.agent_num == 3:
-                    mode_person = 7
-                else:
-                    mode_person = random.randint(1, self.max_mod_person_)
+                mode_person = random.randint(1, self.max_mod_person_)
+                # if self.agent_num == 0:
+                #     mode_person = 5
+                # elif self.agent_num == 1:
+                #     mode_person = 2
+                # elif self.agent_num == 2:
+                #     mode_person = 3
+                # elif self.agent_num == 3:
+                #     mode_person = 7
+                # else:
+                #     mode_person = random.randint(1, self.max_mod_person_)
             # if mode_person == 0:
             #     person_thread = threading.Thread(target=self.person.go_to_goal, args=())
             #     person_thread.start()
-            if self.robot_mode >= 1:
+            if self.use_goal and not self.use_movebase:
                 self.robot_thread = threading.Thread(target=self.robot.go_to_goal, args=())
                 self.robot_thread.start()
 
@@ -1091,9 +1134,9 @@ class GazeborosEnv(gym.Env):
         if self.is_reseting:
             return np.asarray([0,0])
 
-        pos = self.person.calculate_ahead(2.5)
+        pos = self.person.calculate_ahead(2)
         pos_person = self.person.get_pos()
-        pos_relative = GazeborosEnv.get_relative_position(pos, self.robot)
+        pos_relative = GazeborosEnv.get_relative_position(pos, self.robot.relative)
         pos_person_relative = GazeborosEnv.get_relative_position(pos_person, self.robot)
         pos_norm = GazeborosEnv.normalize(pos_relative, self.robot.max_rel_pos_range)
         orientation = GazeborosEnv.normalize(math.atan2(pos_relative[1] - pos_person_relative[1], pos_relative[0] - pos_person_relative[0]), math.pi)
@@ -1122,7 +1165,11 @@ class GazeborosEnv(gym.Env):
         self.add_arrow_observation_to_image(person_pos, person_orientation, self.person_color)
 
         if self.use_goal:
-            self.add_arrow_observation_to_image(current_goal["pos"], current_goal["orientation"], self.goal_color)
+            if self.use_movebase:
+                goal_orientation = current_goal["orientation"]
+            else:
+                goal_orientation = robot_orientation
+            self.add_arrow_observation_to_image(current_goal["pos"], goal_orientation, self.goal_color)
             self.add_line_observation_to_image(robot_pos, current_goal["pos"], self.person_color)
         else:
             self.add_line_observation_to_image(robot_pos, person_pos, self.person_color)
@@ -1359,7 +1406,7 @@ def test():
         #action = gazeboros_env.reachability_action()
         gazeboros_env.step(action)
         gazeboros_env.get_observation()
-        if step % 3000==0:
+        if step % 50==0:
             print("reseting")
             gazeboros_env.reset()
 
