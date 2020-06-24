@@ -116,8 +116,9 @@ class History():
 
 
 class Robot():
-    def __init__(self, name, max_angular_speed=1, max_linear_speed=1, relative=None, agent_num=None, use_goal=False):
+    def __init__(self, name, max_angular_speed=1, max_linear_speed=1, relative=None, agent_num=None, use_goal=False, use_jackal=False):
         self.name = name
+        self.use_jackal = use_jackal
         self.init_node = False
         self.alive = True
         self.prev_call_gazeboros_ = None
@@ -141,7 +142,10 @@ class Robot():
         self.height_laser_image = 50
         self.state_ = {'position':      (None, None),
                        'orientation':   None}
-        self.cmd_vel_pub =  rospy.Publisher('/{}/cmd_vel'.format(name), Twist, queue_size=1)
+        if self.use_jackal:
+            self.cmd_vel_pub =  rospy.Publisher('/{}/jackal_velocity_controller/cmd_vel'.format(name), Twist, queue_size=1)
+        else:
+            self.cmd_vel_pub =  rospy.Publisher('/{}/cmd_vel'.format(name), Twist, queue_size=1)
 
         if "tb3" in self.name and self.use_goal:
             # Create an action client called "move_base" with action definition file "MoveBaseAction"
@@ -289,7 +293,7 @@ class Robot():
             self.goal["orientation"] = orientaion_global
             self.movebase_client_goal(pos_global, orientaion_global)
         else:
-            linear_vel = max(min((1+action[0])/2., self.max_linear_vel), 0)
+            linear_vel = max(min(action[0], self.max_linear_vel), -self.max_linear_vel)
             angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
 
             cmd_vel = Twist()
@@ -352,8 +356,9 @@ class Robot():
             elif person_mode == 7:
                 linear_vel = self.max_linear_vel/3
                 angular_vel = -self.max_angular_vel/6
-            angular_vel += random.uniform(-self.max_angular_vel/4, self.max_angular_vel/4)
-            linear_vel += random.uniform(self.max_linear_vel/4, self.max_linear_vel/4)
+            else:
+                angular_vel += random.uniform(-self.max_angular_vel/4, self.max_angular_vel/4)
+                linear_vel += random.uniform(self.max_linear_vel/4, self.max_linear_vel/4)
             self.publish_cmd_vel(linear_vel, angular_vel)
             time.sleep(0.002)
 
@@ -466,9 +471,11 @@ class GazeborosEnv(gym.Env):
 
         self.is_reseting = True
         self.use_path = False
+        self.use_jackal = True
         self.lock = _thread.allocate_lock()
         self.robot_mode = 0
         self.use_goal = False
+        self.use_reachability = False
 
         self.fallen = False
         self.use_random_around_person_ = False
@@ -502,6 +509,10 @@ class GazeborosEnv(gym.Env):
         else:
             self.max_numb_steps = 900
         self.reward_range = [-1, 1]
+        self.reachabilit_value = None
+        if self.use_reachability:
+            with open('data/reachability.pkl', 'rb') as f:
+                self.reachabilit_value = pickle.load(f)
 
     def set_agent(self, agent_num):
         try:
@@ -571,28 +582,28 @@ class GazeborosEnv(gym.Env):
             angular_vel = twist.angular.z
             state["velocity"] = (linear_vel, angular_vel)
             robot.set_state(state)
-            if robot.name == self.person.name:
-                obstacle_msg_array = ObstacleArrayMsg()
-                obstacle_msg_array.header.stamp = rospy.Time.now()
-                obstacle_msg_array.header.frame_id = "tb3_{}/odom".format(self.agent_num)
-                obstacle_msg = ObstacleMsg()
-                obstacle_msg.header = obstacle_msg_array.header
-                obstacle_msg.id = 0
-                for x in range (5):
-                    for y in range (5):
-                        point = Point32()
-                        point.x = pos.position.x + (x-2)*0.1
-                        point.y = pos.position.y + (y-2)*0.1
-                        point.z = pos.position.z
-                        obstacle_msg.polygon.points.append(point)
-                obstacle_msg.orientation.x = pos.orientation.x
-                obstacle_msg.orientation.y = pos.orientation.y
-                obstacle_msg.orientation.z = pos.orientation.z
-                obstacle_msg.orientation.w = pos.orientation.w
-                obstacle_msg.velocities.twist.linear.x = twist.linear.x
-                obstacle_msg.velocities.twist.angular.z = twist.linear.z
-                obstacle_msg_array.obstacles.append(obstacle_msg)
-                #self.obstacle_pub_.publish(obstacle_msg_array)
+            # if robot.name == self.person.name:
+            #     obstacle_msg_array = ObstacleArrayMsg()
+            #     obstacle_msg_array.header.stamp = rospy.Time.now()
+            #     obstacle_msg_array.header.frame_id = "tb3_{}/odom".format(self.agent_num)
+            #     obstacle_msg = ObstacleMsg()
+            #     obstacle_msg.header = obstacle_msg_array.header
+            #     obstacle_msg.id = 0
+            #     for x in range (5):
+            #         for y in range (5):
+            #             point = Point32()
+            #             point.x = pos.position.x + (x-2)*0.1
+            #             point.y = pos.position.y + (y-2)*0.1
+            #             point.z = pos.position.z
+            #             obstacle_msg.polygon.points.append(point)
+            #     obstacle_msg.orientation.x = pos.orientation.x
+            #     obstacle_msg.orientation.y = pos.orientation.y
+            #     obstacle_msg.orientation.z = pos.orientation.z
+            #     obstacle_msg.orientation.w = pos.orientation.w
+            #     obstacle_msg.velocities.twist.linear.x = twist.linear.x
+            #     obstacle_msg.velocities.twist.angular.z = twist.linear.z
+            #     obstacle_msg_array.obstacles.append(obstacle_msg)
+            #     #self.obstacle_pub_.publish(obstacle_msg_array)
 
     def create_robots(self):
 
@@ -604,7 +615,7 @@ class GazeborosEnv(gym.Env):
         if self.use_goal:
             relative = self.person
         self.robot = Robot('tb3_{}'.format(self.agent_num),
-                            max_angular_speed=2, max_linear_speed=1, relative=relative, agent_num=self.agent_num, use_goal=self.use_goal)
+                            max_angular_speed=1.8, max_linear_speed=1.2, relative=relative, agent_num=self.agent_num, use_goal=self.use_goal, use_jackal=self.use_jackal)
 
     def find_random_point_in_circle(self, radious, min_distance, around_point):
         max_r = 2
@@ -659,7 +670,10 @@ class GazeborosEnv(gym.Env):
         set_model_msg.pose.orientation.z = quaternion_rotation[2]
         set_model_msg.pose.orientation.w = quaternion_rotation[0]
 
-        set_model_msg.pose.position.z = 2.6 * self.agent_num + 0.099
+        if self.use_jackal and "tb3" in name:
+            set_model_msg.pose.position.z = 2.6 * self.agent_num + 0.1635
+        else:
+            set_model_msg.pose.position.z = 2.6 * self.agent_num + 0.099
         set_model_msg.pose.position.x = pose["pos"][0]
         set_model_msg.pose.position.y = pose["pos"][1]
         self.set_model_state_sp(set_model_msg)
@@ -734,11 +748,17 @@ class GazeborosEnv(gym.Env):
         return norm_val
 
     @staticmethod
-    def normalize(value, max_val):
+    def normalize(value, max_val, zero_to_one=None):
         if type(value) == tuple or type(value) == list:
             norm_val = [x/float(max_val) for x in value]
         else:
             norm_val = value/float(max_val)
+        if zero_to_one is not None:
+            if type(value) == tuple or type(value) == list:
+                norm_val = [(x + 1)/2 for x in norm_val]
+            else:
+                norm_val = (norm_val + 1)/2.
+
         return norm_val
 
     @staticmethod
@@ -1071,7 +1091,7 @@ class GazeborosEnv(gym.Env):
         if self.is_reseting:
             return np.asarray([0,0])
 
-        pos = self.person.calculate_ahead(2)
+        pos = self.person.calculate_ahead(2.5)
         pos_person = self.person.get_pos()
         pos_relative = GazeborosEnv.get_relative_position(pos, self.robot)
         pos_person_relative = GazeborosEnv.get_relative_position(pos_person, self.robot)
@@ -1265,6 +1285,58 @@ class GazeborosEnv(gym.Env):
         """ Viewer only supports human mode currently. """
         return
 
+    def calculate_rechability_derivite(self, x, y, v, theta):
+
+        get_idx = lambda x: int(math.floor(x))
+        pos_norm = GazeborosEnv.normalize((x, y), self.robot.max_rel_pos_range, True)
+        orientation_norm = GazeborosEnv.normalize(theta, math.pi, True)
+        velocity_norm = GazeborosEnv.normalize(v, self.robot.max_linear_vel, True)
+        x_idx = get_idx(pos_norm[0]*(self.reachabilit_value.shape[0]-1))
+        y_idx = get_idx(pos_norm[1]*(self.reachabilit_value.shape[1]-1))
+        orientation_idx = get_idx(orientation_norm * (self.reachabilit_value.shape[3] -1))
+        v_idx = get_idx(velocity_norm * (self.reachabilit_value.shape[2]-1))
+
+        rospy.loginfo("x: {} y: {} theta {}".format(x_idx, y_idx, orientation_idx))
+        v_idx = max(min(v_idx, self.reachabilit_value.shape[2]-2), 0)
+        orientation_idx = max(min(orientation_idx, self.reachabilit_value.shape[3]-2), 0)
+        x_idx =  max(min(x_idx, self.reachabilit_value.shape[0]-1), 0)
+        y_idx =  max(min(y_idx, self.reachabilit_value.shape[1]-1), 0)
+
+        derivative_v = (self.reachabilit_value[x_idx, y_idx, v_idx+1, orientation_idx] -\
+                       self.reachabilit_value[x_idx, y_idx, v_idx, orientation_idx])/2
+
+
+        derivative_theta = (self.reachabilit_value[x_idx, y_idx, v_idx, orientation_idx+1] -\
+                       self.reachabilit_value[x_idx, y_idx, v_idx, orientation_idx])/2
+
+
+        rospy.loginfo("x: {} y: {} theta {}".format(x_idx, y_idx, orientation_idx))
+        return derivative_v, derivative_theta, self.reachabilit_value[x_idx, y_idx, v_idx, orientation_idx]
+
+    def reachability_action(self):
+        relative = GazeborosEnv.get_relative_position(self.robot.get_pos(), self.person)
+        orientation = GazeborosEnv.wrap_pi_to_pi(self.robot.get_orientation() - self.person.get_orientation())
+        print (np.rad2deg(orientation), np.rad2deg(self.person.get_orientation()), np.rad2deg(self.robot.get_orientation()) )
+        velocity = self.robot.get_velocity()[0]
+        derivative_v, derivative_theta, v = self.calculate_rechability_derivite(relative[0], relative[1], velocity, orientation)
+        rospy.loginfo("d_v: {:0.5f} W: {:0.5f} v {:0.1f}".format(derivative_v, derivative_theta, v))
+        action = [0,0]
+        if v<1:
+            if derivative_v > 0:
+                action[0] = 1
+            else:
+                action[0] = -1
+            if derivative_theta > 0:
+                action[1] = 1
+            else:
+                action[1] = -1
+
+        return action
+
+
+
+
+
 
 #def read_bag():
 #    gazeboros_n = GazeborosEnv()
@@ -1284,14 +1356,15 @@ def test():
     while (True):
         step +=1
         action = gazeboros_env.get_supervised_action()
+        #action = gazeboros_env.reachability_action()
         gazeboros_env.step(action)
         gazeboros_env.get_observation()
-        if step % 30==0:
+        if step % 3000==0:
             print("reseting")
             gazeboros_env.reset()
 
         #gazeboros_env.visualize_observation()
-        time.sleep(0.01)
+        rospy.sleep(0.05)
 
 
 #test()
