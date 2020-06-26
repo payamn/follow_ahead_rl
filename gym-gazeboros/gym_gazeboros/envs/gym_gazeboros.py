@@ -498,6 +498,7 @@ class GazeborosEnv(gym.Env):
         self.use_reachability = False
 
         self.fallen = False
+        self.is_max_distance = False
         self.use_random_around_person_ = False
         self.max_mod_person_ = 7
         self.wait_observation_ = 0
@@ -525,7 +526,7 @@ class GazeborosEnv(gym.Env):
         self.min_distance = 1
         self.max_distance = 2.5
         if self.test_simulation_ or self.is_evaluation_:
-           self.max_numb_steps = 64
+           self.max_numb_steps = 640
         else:
             self.max_numb_steps = 900
         self.reward_range = [-1, 1]
@@ -709,6 +710,7 @@ class GazeborosEnv(gym.Env):
         self.robot_color = [255,0,0]
         self.person_color = [0,0,255]
         self.fallen = False
+        self.is_max_distance = False
         self.goal_color = [0,255,0]
         self.first_call_observation = True
 
@@ -932,7 +934,10 @@ class GazeborosEnv(gym.Env):
             elif self.is_evaluation_:
                 mode_person = 2
             else:
-                mode_person = random.randint(1, self.max_mod_person_)
+                if self.agent_num == 2:
+                    mode_person = random.randint(1, self.max_mod_person_)
+                else:
+                    mode_person = 0
                 # if self.agent_num == 0:
                 #     mode_person = 5
                 # elif self.agent_num == 1:
@@ -1195,6 +1200,12 @@ class GazeborosEnv(gym.Env):
         self.wait_observation_ -= 1
         return
 
+    def is_successful(self):
+        if self.is_collided() or self.is_max_distance or self.fallen:
+            return False
+        else:
+            return True
+
     def step(self, action):
         self.number_of_steps += 1
         self.take_action(action)
@@ -1225,6 +1236,7 @@ class GazeborosEnv(gym.Env):
             reward -= 0.5
         elif distance > 5:
             self.update_observation_image()
+            self.is_max_distance = True
             episode_over = True
             rospy.loginfo('max distance happened episode over')
         elif self.number_of_steps > self.max_numb_steps:
