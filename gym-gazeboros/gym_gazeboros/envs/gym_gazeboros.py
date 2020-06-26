@@ -1200,7 +1200,7 @@ class GazeborosEnv(gym.Env):
         self.take_action(action)
         # instead of one reward get all the reward during wait
         # rospy.sleep(0.4)
-        sleep_time = 0.15
+        sleep_time = 0.10
         rewards = []
         if sleep_time > 0.1:
             for t in range (10):
