@@ -488,7 +488,7 @@ class GazeborosEnv(gym.Env):
         # self.image_pub_gt = rospy.Publisher("image_observation_gt", Image)
 
         self.is_reseting = True
-        self.use_path = False
+        self.use_path = True
         self.use_jackal = True
         self.lock = _thread.allocate_lock()
 
