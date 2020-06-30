@@ -697,6 +697,7 @@ class GazeborosEnv(gym.Env):
             set_model_msg.pose.position.z = 2.6 * self.agent_num + 0.099
         set_model_msg.pose.position.x = pose["pos"][0]
         set_model_msg.pose.position.y = pose["pos"][1]
+        rospy.wait_for_service('/gazebo/set_model_state')
         self.set_model_state_sp(set_model_msg)
 
     def init_simulator(self):
@@ -1199,6 +1200,12 @@ class GazeborosEnv(gym.Env):
             self.wait_observation_ = 5
         self.wait_observation_ -= 1
         return
+
+    def is_skip_run(self):
+        if self.fallen:
+            return True
+        else:
+            return False
 
     def is_successful(self):
         if self.is_collided() or self.is_max_distance or self.fallen:
