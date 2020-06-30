@@ -135,7 +135,6 @@ class Robot():
         self.goal = {"pos": None, "orientation": None}
         self.use_goal = use_goal
         self.use_movebase = use_movebase
-        self.collision_distance = 0.5
         self.max_angular_vel = max_angular_speed
         self.max_linear_vel = max_linear_speed
         self.max_rel_pos_range = 5.0 # meter
@@ -494,6 +493,7 @@ class GazeborosEnv(gym.Env):
 
         self.use_goal = True
         self.robot_mode = 0
+        self.collision_distance = 0.5
         self.use_movebase = False
         self.use_reachability = False
 
@@ -1262,7 +1262,7 @@ class GazeborosEnv(gym.Env):
     def is_collided(self):
         rel_person = GazeborosEnv.get_relative_heading_position(self.robot, self.person)[1]
         distance = math.hypot(rel_person[0], rel_person[1])
-        if distance < 0.7 or self.robot.is_collided:
+        if distance < self.collision_distance or self.robot.is_collided:
             return True
         return False
 
@@ -1275,7 +1275,7 @@ class GazeborosEnv(gym.Env):
         # Negative reward for being behind the person
         if self.is_collided():
             reward -= 1
-        if distance < 0.7:
+        if distance < 0.5:
             reward = -1.3
         elif abs(distance - 2) < 0.5:
             reward += 0.25 * (0.5 - abs(distance - 2))
@@ -1283,8 +1283,8 @@ class GazeborosEnv(gym.Env):
             reward -= 0.25 * (distance - 2.5)
         elif distance < 1.5:
             reward -= (1.5 - distance)/1.5
-        if abs(angle_robot_person) < 45:
-            reward += 0.2 * (45 - abs(angle_robot_person)) / 45
+        if abs(angle_robot_person) < 25:
+            reward += 0.3 * (25 - abs(angle_robot_person)) / 25
         else:
             reward -= 0.25 * abs(angle_robot_person) / 180
 
