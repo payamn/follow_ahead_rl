@@ -1,0 +1,49 @@
+<launch>
+  <arg name="model" default="burger" doc="model type [burger, waffle, waffle_pi]"/>
+  <arg name="first_tb3"  default="tb3_0"/>
+  <arg name="first_person"  default="person_0"/>
+
+  <arg name="floor"  default="$(find follow_ahead_rl)/models/empty_floor/model.sdf"/>
+
+  <arg name="first_tb3_x_pos" default="-7.0"/>
+  <arg name="first_tb3_y_pos" default="-1.0"/>
+  <arg name="first_tb3_z_pos" default=" 0.0"/>
+  <arg name="first_tb3_yaw"   default=" 1.57"/>
+
+  <arg name="rviz"        default="false"/>
+
+  <arg name="ns0"        default="tb3_0"/>
+  <arg name="config0"    default="base"/>
+  <arg name="config0_id" default="0"/>
+
+<!-- Spawn the robots. -->
+  <include file="$(find multi_jackal_base)/launch/jackal_base.launch">
+    <arg name="ns"            value="$(arg ns0)"/>
+    <arg name="config"        value="$(arg config0)"/>
+    <arg name="config_id"     value="$(arg config0_id)"/>
+    <arg name="use_move_base" value="false"/>
+    <arg name="x"             value="2"/>
+    <arg name="y"             value="-4"/>
+    <arg name="yaw"           value="0.7"/>
+  </include>
+
+  <!-- View in RVIZ. -->
+  <group if="$(arg rviz)">
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find multi_jackal_tutorials)/rviz/three_jackal.rviz" >
+      <remap from="/move_base_simple/goal" to="/$(arg ns2)/move_base_simple/goal"/>
+    </node>
+  </group>
+  <group ns = "$(arg first_person)">
+    <param name="robot_description" command="$(find xacro)/xacro --inorder $(find follow_ahead_rl)/urdf/turtlebot3_$(arg model)_without_laser.urdf.xacro" />
+
+    <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+      <param name="publish_frequency" type="double" value="50.0" />
+      <param name="tf_prefix" value="$(arg first_person)" />
+    </node>
+
+    <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-urdf -model $(arg first_person) -x $(arg first_tb3_x_pos) -y 2 -z $(arg first_tb3_z_pos) -Y $(arg first_tb3_yaw) -param robot_description" />
+  </group>
+
+
+
+</launch>

@@ -491,6 +491,10 @@ class GazeborosEnv(gym.Env):
         self.use_jackal = True
         self.lock = _thread.allocate_lock()
 
+        self.path_follower_test_settings = [0, 1, 2, 3, 4, 5, 6, 7]
+        self.path_follower_current_setting_idx = 0
+        self.is_use_test_setting = False
+
         self.use_goal = True
         self.robot_mode = 0
         self.collision_distance = 0.5
@@ -534,6 +538,13 @@ class GazeborosEnv(gym.Env):
         if self.use_reachability:
             with open('data/reachability.pkl', 'rb') as f:
                 self.reachabilit_value = pickle.load(f)
+
+    def get_test_path_number(self):
+        rospy.loginfo("current path idx: {}".format(self.path_follower_current_setting_idx))
+        return self.path_follower_current_setting_idx
+
+    def use_test_setting(self):
+        self.is_use_test_setting = True
 
     def set_agent(self, agent_num):
         try:
@@ -647,7 +658,7 @@ class GazeborosEnv(gym.Env):
         return (x, y)
 
     def get_init_pos_robot_person(self):
-        if self.is_evaluation_:
+        if self.is_evaluation_ or self.is_use_test_setting:
             idx_start = 0
         else:
             idx_start = random.randint(0, len(self.path["points"]) - 20)
@@ -930,7 +941,9 @@ class GazeborosEnv(gym.Env):
         if self.lock.acquire(timeout=10):
             rospy.sleep(1.5)
             rospy.loginfo("path follower got the lock")
-            if self.test_simulation_:
+            if self.is_use_test_setting:
+                mode_person = self.path_follower_test_settings[self.path_follower_current_setting_idx]
+            elif self.test_simulation_:
                 mode_person = -1
             elif self.is_evaluation_:
                 mode_person = 2
@@ -1266,11 +1279,16 @@ class GazeborosEnv(gym.Env):
             return True
         return False
 
+    def get_angle_person_robot(self):
+        _, pos_rel = GazeborosEnv.get_relative_heading_position(self.robot, self.person)
+        angle_robot_person = math.atan2(pos_rel[1], pos_rel[0])
+        return (GazeborosEnv.wrap_pi_to_pi(angle_robot_person))
+
     def get_reward(self):
         reward = 0
         angle_robot_person, pos_rel = GazeborosEnv.get_relative_heading_position(self.robot, self.person)
         angle_robot_person = math.atan2(pos_rel[1], pos_rel[0])
-        angle_robot_person = np.rad2deg(angle_robot_person)
+        angle_robot_person = np.rad2deg(GazeborosEnv.wrap_pi_to_pi(angle_robot_person))
         distance = math.hypot(pos_rel[0], pos_rel[1])
         # Negative reward for being behind the person
         if self.is_collided():
@@ -1346,6 +1364,14 @@ class GazeborosEnv(gym.Env):
         else:
             rospy.sleep(2)
             return self.get_observation()
+
+    def next_setting(self):
+        self.path_follower_current_setting_idx += 1
+
+    def is_finish(self):
+        if self.path_follower_current_setting_idx >= len(self.path_follower_test_settings):
+            return True
+        return False
 
     def render(self, mode='human', close=False):
         """ Viewer only supports human mode currently. """
