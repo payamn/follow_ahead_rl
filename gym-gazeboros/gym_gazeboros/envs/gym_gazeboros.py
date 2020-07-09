@@ -532,7 +532,7 @@ class GazeborosEnv(gym.Env):
         if self.test_simulation_ or self.is_evaluation_:
            self.max_numb_steps = 640
         else:
-            self.max_numb_steps = 900
+            self.max_numb_steps = 100
         self.reward_range = [-1, 1]
         self.reachabilit_value = None
         if self.use_reachability:
