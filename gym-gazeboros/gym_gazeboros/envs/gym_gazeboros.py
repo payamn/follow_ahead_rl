@@ -1369,7 +1369,7 @@ class GazeborosEnv(gym.Env):
         self.path_follower_current_setting_idx += 1
 
     def is_finish(self):
-        if self.path_follower_current_setting_idx >= len(self.path_follower_test_settings):
+        if self.path_follower_current_setting_idx >= len(self.path_follower_test_settings)-1:
             return True
         return False
 
