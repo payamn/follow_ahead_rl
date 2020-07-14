@@ -503,7 +503,7 @@ class GazeborosEnv(gym.Env):
 
         self.fallen = False
         self.is_max_distance = False
-        self.use_random_around_person_ = False
+        self.use_random_around_person_ = True
         self.max_mod_person_ = 7
         self.wait_observation_ = 0
 
@@ -948,10 +948,11 @@ class GazeborosEnv(gym.Env):
             elif self.is_evaluation_:
                 mode_person = 2
             else:
-                if self.agent_num == 2:
-                    mode_person = random.randint(1, self.max_mod_person_)
-                else:
-                    mode_person = 0
+                mode_person = 0
+                #if self.agent_num == 2:
+                #    mode_person = random.randint(1, self.max_mod_person_)
+                #else:
+                #    mode_person = 0
                 # if self.agent_num == 0:
                 #     mode_person = 5
                 # elif self.agent_num == 1:

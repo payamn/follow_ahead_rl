@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 class Logger(object):
 
-    def __init__(self, log_dir, name, project_name="follow_ahead_point_with_ppo_v0.2", use_wandb=True):
+    def __init__(self, log_dir, name, project_name="follow_ahead_d4pg_v0.1newplannerdense600numa41", use_wandb=True, reinit=False):
         """
         General logger.
 
@@ -18,7 +18,7 @@ class Logger(object):
         if not use_wandb:
             self.writer = SummaryWriter(log_dir)
         else:
-            wandb.init(project=project_name, name=name)
+            wandb.init(project=project_name, name=name, reinit=reinit)
 
         self.use_wandb = use_wandb
         self.info = logger.info
@@ -45,5 +45,8 @@ class Logger(object):
             self.writer.add_scalar(tag, value, step)
 
     def close(self):
-        self.writer.close()
+        if self.use_wandb:
+            wandb.join()
+        else:
+            self.writer.close()
 
