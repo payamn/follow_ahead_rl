@@ -532,7 +532,7 @@ class GazeborosEnv(gym.Env):
         if self.test_simulation_ or self.is_evaluation_:
            self.max_numb_steps = 640
         else:
-            self.max_numb_steps = 900
+            self.max_numb_steps = 100
         self.reward_range = [-1, 1]
         self.reachabilit_value = None
         if self.use_reachability:
@@ -1369,7 +1369,7 @@ class GazeborosEnv(gym.Env):
         self.path_follower_current_setting_idx += 1
 
     def is_finish(self):
-        if self.path_follower_current_setting_idx >= len(self.path_follower_test_settings):
+        if self.path_follower_current_setting_idx >= len(self.path_follower_test_settings)-1:
             return True
         return False
 
