@@ -53,10 +53,10 @@ args = parser.parse_args()
 
 ENV_NAME = 'gazeboros-v0'  # environment name
 RANDOMSEED = 2  # random seed
-PROJECT_NAME = "ppo_v_0.2_2cmd_vel"  # Project name for loging
+PROJECT_NAME = "ppo_v_0.2_2point"  # Project name for loging
 
 EP_MAX = 100000  # total number of episodes for training
-EP_LEN = 60  # total number of steps for each episode
+EP_LEN = 80  # total number of steps for each episode
 GAMMA = 0.95  # reward discount
 A_LR = 0.0001  # learning rate for actor
 C_LR = 0.0002  # learning rate for critic
@@ -379,6 +379,9 @@ def worker(id, ppo, rewards_queue):
         ep_r = 0
         t0 = time.time()
         is_invalid = False
+        heading_avg = []
+        reward_avg = []
+        distance_avg = []
         for t in range(EP_LEN):  # in one episode
             # env.render()
             a = ppo.choose_action(s)
@@ -392,6 +395,10 @@ def worker(id, ppo, rewards_queue):
             buffer['reward'].append((r + 8) / 8)  # normalize reward, find to be useful sometimes; from my experience, it works with 'penalty' version, while 'clip' verison works without this normalization
             s = s_
             ep_r += r
+            if hasattr(env, 'get_angle_person_robot'):
+                heading_avg.append(np.rad2deg(env.get_angle_person_robot()))
+            distance_avg.append(math.hypot(s[0]*6, s[1]*6))
+            reward_avg.append(r)
 
             # update ppo
             if (t + 1) % BATCH == 0 or t == EP_LEN - 1 or done:
@@ -408,8 +415,8 @@ def worker(id, ppo, rewards_queue):
                 bs, ba, br = np.vstack(buffer['state']), np.vstack(buffer['action']), np.array(discounted_r)[:, np.newaxis]
                 buffer['state'], buffer['action'], buffer['reward'] = [], [], []
                 loss_policy, loss_actor = ppo.update(bs, ba, br)
-                logger.scalar_summary("actor_loss", loss_actor, ep)
-                logger.scalar_summary("policy_loss", loss_policy, ep)
+                logger.scalar_summary("actor_loss", loss_actor, ep*4)
+                logger.scalar_summary("policy_loss", loss_policy, ep*4)
 
             if done:
                 break
@@ -427,12 +434,16 @@ def worker(id, ppo, rewards_queue):
                 time.time() - t0
             )
         )
-        logger.scalar_summary("reward".format(id), ep_r, ep)
+        logger.scalar_summary("reward".format(id), ep_r, ep*4)
         observation_image = env.get_current_observation_image()
+        if len(heading_avg)>0:
+            logger.scalar_summary("agent/heading_avg", np.mean(heading_avg), ep*4)
+        logger.scalar_summary("agent/reward_avg", np.mean(reward_avg), ep*4)
+        logger.scalar_summary("agent/distance_avg", np.mean(distance_avg), ep*4)
         if t >= EP_LEN-1:
-            logger.image_summar("agent_{}/observation_end".format(id), observation_image, ep)
+            logger.image_summar("agent_{}/observation_end".format(id), observation_image, ep*4)
         else:
-            logger.image_summar("agent_{}/observation_error".format(id), observation_image, ep)
+            logger.image_summar("agent_{}/observation_error".format(id), observation_image, ep*4)
 
 
         rewards_queue.put(ep_r)
