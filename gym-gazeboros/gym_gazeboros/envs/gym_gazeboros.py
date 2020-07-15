@@ -336,7 +336,7 @@ class Robot():
         self.cmd_vel_pub.publish(cmd_vel)
 
     def use_selected_person_mod(self, person_mode):
-        while person_mode>0:
+        while person_mode<=6:
             if self.is_pause:
                 self.stop_robot()
                 return
@@ -346,31 +346,28 @@ class Robot():
                 return
             angular_vel = 0
             linear_vel = 0
+            if person_mode == 0:
+                linear_vel = self.max_linear_vel
             if person_mode == 1:
+                linear_vel = self.max_linear_vel * random.random()
+            elif person_mode == 2:
                 linear_vel = self.max_linear_vel/2
                 angular_vel = self.max_angular_vel/6
-            elif person_mode == 2:
-                linear_vel = self.max_linear_vel/4
-                angular_vel = -self.max_angular_vel/7
             elif person_mode == 3:
-                linear_vel = self.max_linear_vel
-                angular_vel = -self.max_angular_vel/3
+                linear_vel = self.max_linear_vel/2
+                angular_vel = -self.max_angular_vel/6
             elif person_mode == 4:
-                linear_vel = self.max_linear_vel * random.random()
-                angular_vel = 0
+                linear_vel, angular_vel = self.get_velocity()
+                linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
+                angular_vel = -self.max_angular_vel/6
             elif person_mode == 5:
-                linear_vel = self.max_linear_vel
-                angular_vel = self.max_angular_vel/2
+                linear_vel, angular_vel = self.get_velocity()
+                linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
+                angular_vel = self.max_angular_vel/6
             elif person_mode == 6:
                 linear_vel, angular_vel = self.get_velocity()
                 linear_vel = linear_vel - (linear_vel - (random.random()/2 + 0.5))/2.
                 angular_vel = angular_vel - (angular_vel - (random.random()-0.5)*2)/2.
-            elif person_mode == 7:
-                linear_vel = self.max_linear_vel/3
-                angular_vel = -self.max_angular_vel/6
-            else:
-                angular_vel += random.uniform(-self.max_angular_vel/4, self.max_angular_vel/4)
-                linear_vel += random.uniform(self.max_linear_vel/4, self.max_linear_vel/4)
             self.publish_cmd_vel(linear_vel, angular_vel)
             time.sleep(0.002)
 
@@ -494,6 +491,8 @@ class GazeborosEnv(gym.Env):
         self.path_follower_test_settings = [0, 1, 2, 3, 4, 5, 6, 7]
         self.path_follower_current_setting_idx = 0
         self.is_use_test_setting = False
+        self.use_predifined_mode_person = True
+        self.mode_person = 0
 
         self.use_goal = True
         self.robot_mode = 0
@@ -503,7 +502,7 @@ class GazeborosEnv(gym.Env):
 
         self.fallen = False
         self.is_max_distance = False
-        self.use_random_around_person_ = True
+        self.use_random_around_person_ = False
         self.max_mod_person_ = 7
         self.wait_observation_ = 0
 
@@ -656,6 +655,20 @@ class GazeborosEnv(gym.Env):
         x = around_point[0] + r * math.cos(theta)
         y = around_point[1] + r * math.sin(theta)
         return (x, y)
+
+    def set_mode_person_based_on_episode_number(self, episode_number):
+        if episode_number < 500:
+            self.mode_person = 0
+        elif episode_number < 1000:
+            self.mode_person = 1
+        elif episode_number < 1500:
+            self.mode_person = 3
+        elif episode_number < 2500:
+            self.mode_person = 5
+        elif episode_number < 3000:
+            self.mode_person = 6
+        else:
+            self.mode_person = 7
 
     def get_init_pos_robot_person(self):
         if self.is_evaluation_ or self.is_use_test_setting:
@@ -947,6 +960,8 @@ class GazeborosEnv(gym.Env):
                 mode_person = -1
             elif self.is_evaluation_:
                 mode_person = 2
+            elif self.use_predifined_mode_person:
+                mode_person = self.mode_person
             else:
                 mode_person = 0
                 #if self.agent_num == 2:
@@ -984,7 +999,7 @@ class GazeborosEnv(gym.Env):
                         return
                     time.sleep(0.001)
                 try:
-                    if mode_person != 0:
+                    if mode_person <= 6:
                         self.person.use_selected_person_mod(mode_person)
                     else:
                         self.person.go_to_pos(point, stop_after_getting=True)
