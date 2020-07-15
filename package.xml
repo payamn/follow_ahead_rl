@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <package format="2">
-  <name>follow_ahead_rl</name>
+  <name>person_detection</name>
   <version>0.0.0</version>
   <description>The follow_ahead_rl package</description>
 
