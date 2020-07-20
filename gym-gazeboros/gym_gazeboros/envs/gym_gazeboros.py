@@ -294,17 +294,12 @@ class Robot():
 
         if self.use_goal:
             pos = GazeborosEnv.denormalize(action[0:2], self.max_rel_pos_range)
+            pos_global = GazeborosEnv.get_global_position(pos, self.relative)
             self.goal["orientation"] = self.get_orientation()
-            if len(action)>2:
-                orientation = GazeborosEnv.denormalize(action[2], math.pi)
-                pos_global, orientaion_global = GazeborosEnv.get_global_position_orientation(pos, orientation, self.relative)
-                self.goal["pos"] = pos_global
-                self.goal["orientation"] = orientaion_global
-                self.movebase_client_goal(pos_global, orientaion_global)
-            else:
-                pos_global = GazeborosEnv.get_global_position(pos, self.relative)
-                #relative_robot = GazeborosEnv.get_relative_position(pos_global, self)
-                self.goal["pos"] = pos_global
+            self.goal["pos"] = pos_global
+            if self.use_movebase:
+                #orientation = GazeborosEnv.denormalize(action[2], math.pi)
+                self.movebase_client_goal(pos_global, self.goal["orientation"])
         else:
             linear_vel = max(min(action[0], self.max_linear_vel), -self.max_linear_vel)
             angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
@@ -520,12 +515,8 @@ class GazeborosEnv(gym.Env):
         self.current_obsevation_image_ = np.zeros([2000,2000,3])
         self.current_obsevation_image_.fill(255)
 
-        if self.use_movebase:
-            self.prev_action = (0, 0, 0)
-            self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0, -1.0]), high=np.array([1.0, 1.0, 1.0]), dtype=np.float32)
-        else:
-            self.prev_action = (0, 0)
-            self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
+        self.prev_action = (0, 0)
+        self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
 
         self.min_distance = 1
         self.max_distance = 2.5
@@ -705,10 +696,7 @@ class GazeborosEnv(gym.Env):
     def set_pos(self, name, pose):
         set_model_msg = ModelState()
         set_model_msg.model_name = name
-        if self.use_movebase:
-            self.prev_action = (0,0, 0)
-        else:
-            self.prev_action = (0,0)
+        self.prev_action = (0,0)
         quaternion_rotation = euler2quat(0, pose["orientation"], 0)
 
         set_model_msg.pose.orientation.x = quaternion_rotation[3]
