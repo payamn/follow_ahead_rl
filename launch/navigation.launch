@@ -2,16 +2,16 @@
   <param name="/use_sim_time" value="true"/>
   <arg name="move_base_goal_frequency" default="0.5" />
   <arg name="agent_num" default="0" />
-  <arg name="base_frame" default="tb3_$(arg agent_num)/base_footprint" />
+  <arg name="base_frame" default="tb3_$(arg agent_num)/base_link" />
   <arg name="odom_frame" default="tb3_$(arg agent_num)/odom" />
-  <arg name="scan_frame" default="tb3_$(arg agent_num)/base_scan" />
-  <arg name="scan_topic" default="tb3_$(arg agent_num)/scan" />
+  <arg name="scan_frame" default="tb3_$(arg agent_num)/front_laser" />
+  <arg name="scan_topic" default="tb3_$(arg agent_num)/front/scan" />
   <arg name="odom_topic" default="/tb3_$(arg agent_num)/odom" />
   <arg name="map_frame" default="tb3_$(arg agent_num)/odom" />
 
   <arg name="use_global" default="true"/>
-  <arg name="use_trajectory" default="true"/>
-  <arg name="use_teb" default="false"/>
+  <arg name="use_trajectory" default="false"/>
+  <arg name="use_teb" default="true"/>
   <arg name="use_dwa" default="false"/>
 
 
@@ -53,7 +53,7 @@
     <param name="controller_frequency" value="20.0" />
     <param name="controller_patience" value="15.0" />
     <param name="recovery_behavior_enabled" value="true" />
-    <remap from="/cmd_vel" to="/tb3_$(arg agent_num)/cmd_vel" />
+    <remap from="/cmd_vel" to="/tb3_$(arg agent_num)/jackal_velocity_controller/cmd_vel" />
     <remap from="/move_base_simple/goal" to="/move_base_simple/goal_$(arg agent_num)" />
     <remap from="/move_base/cancel" to="/move_base_$(arg agent_num)/cancel" />
     <remap from="/move_base/feedback" to="/move_base_$(arg agent_num)/feedback" />
@@ -62,21 +62,21 @@
     <remap from="/move_base/status" to="/move_base_$(arg agent_num)/status" />
 
     <param name="local_costmap/global_frame" value="$(arg odom_frame)" />
-    <param name="local_costmap/local_frame" value="$(arg scan_frame)" />
+    <param name="local_costmap/local_frame" value="$(arg base_frame)" />
     <param name="global_costmap/global_frame" value="$(arg odom_frame)" />
-    <param name="global_costmap/local_frame" value="$(arg scan_frame)" />
+    <param name="global_costmap/local_frame" value="$(arg base_frame)" />
     <rosparam file="$(find follow_ahead_rl)/config_nav/costmap_common_params.yaml" command="load" ns="global_costmap" />
     <rosparam file="$(find follow_ahead_rl)/config_nav/costmap_common_params.yaml" command="load" ns="local_costmap" />
     <rosparam file="$(find follow_ahead_rl)/config_nav/local_costmap_params.yaml" command="load" />
     <rosparam file="$(find follow_ahead_rl)/config_nav/global_costmap_params.yaml" command="load" />
 
     <!-- Costmap common param (for both local and global) -->
-    <param name="local_costmap/robot_base_frame" value="$(arg scan_frame)" />
-    <param name="local_costmap/obstacles_laser/laser_sensor/sensor_frame" value="$(arg scan_frame)" />
+    <param name="local_costmap/robot_base_frame" value="$(arg base_frame)" />
+    <!--param name="local_costmap/obstacles_laser/laser_sensor/sensor_frame" value="$(arg scan_frame)" />
     <param name="local_costmap/obstacles_laser/laser_sensor/topic" value="$(arg scan_topic)" />
     <param name="global_costmap/obstacles_laser/laser_sensor/sensor_frame" value="$(arg scan_frame)" />
-    <param name="global_costmap/obstacles_laser/laser_sensor/topic" value="$(arg scan_topic)" />
-    <param name="global_costmap/robot_base_frame" value="$(arg scan_frame)" />
+    <param name="global_costmap/obstacles_laser/laser_sensor/topic" value="$(arg scan_topic)" /-->
+    <param name="global_costmap/robot_base_frame" value="$(arg base_frame)" />
 
 
     <!-- Local planner -->

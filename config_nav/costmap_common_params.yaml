@@ -39,21 +39,21 @@ inflation:
     enabled: true
 
 
-obstacles_laser:
-    enabled: true
-    footprint_clearing_enabled: true
-    combination_method: 1
-    observation_sources: laser_sensor
-    laser_sensor: {
-      #      sensor_frame: $(arg sensor_frame),
-      data_type: LaserScan,
-      #      topic: $(arg sensor_topic),
-      expected_update_rate: 10.0,
-      track_unknown_space: true,
-      marking: true, clearing: true,
-      obstacle_range: 5,
-      raytrace_range: 8.5
-      }
+    # obstacles_laser:
+    #     enabled: true
+    #     footprint_clearing_enabled: true
+    #     combination_method: 1
+    #     observation_sources: laser_sensor
+    #     laser_sensor: {
+    #       #      sensor_frame: $(arg sensor_frame),
+    #       data_type: LaserScan,
+    #       #      topic: $(arg sensor_topic),
+    #       expected_update_rate: 10.0,
+    #       track_unknown_space: true,
+    #       marking: true, clearing: true,
+    #       obstacle_range: 5,
+    #       raytrace_range: 8.5
+    #       }
 
     # obstacles_laser:
     #     footprint_clearing_enabled: false
