@@ -294,16 +294,12 @@ class Robot():
 
         if self.use_goal:
             pos = GazeborosEnv.denormalize(action[0:2], self.max_rel_pos_range)
+            pos_global = GazeborosEnv.get_global_position(pos, self.relative)
+            self.goal["orientation"] = self.get_orientation()
+            self.goal["pos"] = pos_global
             if self.use_movebase:
-                orientation = GazeborosEnv.denormalize(action[2], math.pi)
-                pos_global, orientaion_global = GazeborosEnv.get_global_position_orientation(pos, orientation, self.relative)
-                self.goal["pos"] = pos_global
-                self.goal["orientation"] = orientaion_global
-                self.movebase_client_goal(pos_global, orientaion_global)
-            else:
-                pos_global = GazeborosEnv.get_global_position(pos, self.relative)
-                #relative_robot = GazeborosEnv.get_relative_position(pos_global, self)
-                self.goal["pos"] = pos_global
+                #orientation = GazeborosEnv.denormalize(action[2], math.pi)
+                self.movebase_client_goal(pos_global, self.goal["orientation"])
         else:
             linear_vel = max(min(action[0], self.max_linear_vel), -self.max_linear_vel)
             angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
@@ -497,7 +493,7 @@ class GazeborosEnv(gym.Env):
         self.use_goal = True
         self.robot_mode = 0
         self.collision_distance = 0.5
-        self.use_movebase = False
+        self.use_movebase = True
         self.use_reachability = False
 
         self.fallen = False
@@ -519,12 +515,8 @@ class GazeborosEnv(gym.Env):
         self.current_obsevation_image_ = np.zeros([2000,2000,3])
         self.current_obsevation_image_.fill(255)
 
-        if self.use_movebase:
-            self.prev_action = (0, 0, 0)
-            self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0, -1.0]), high=np.array([1.0, 1.0, 1.0]), dtype=np.float32)
-        else:
-            self.prev_action = (0, 0)
-            self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
+        self.prev_action = (0, 0)
+        self.action_space = gym.spaces.Box(low=np.array([-1.0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32)
 
         self.min_distance = 1
         self.max_distance = 2.5
@@ -545,6 +537,7 @@ class GazeborosEnv(gym.Env):
     def use_test_setting(self):
         self.is_use_test_setting = True
 
+
     def set_agent(self, agent_num):
         try:
             self.node = rospy.init_node('gym_gazeboros_{}'.format(agent_num))
@@ -553,9 +546,8 @@ class GazeborosEnv(gym.Env):
         rospy.wait_for_service('/gazebo/set_model_state')
         self.set_model_state_sp = rospy.ServiceProxy('/gazebo/set_model_state', SetModelState)
         date_time = datetime.now().strftime("%m_%d_%Y_%H_%M_%S")
-        self.log_file = open('log_{}.pkl'.format(date_time), "wb")
         self.agent_num = agent_num
-        #self.obstacle_pub_ =  rospy.Publisher('/move_base_node_{}/TebLocalPlannerROS/obstacles'.format(self.agent_num), ObstacleArrayMsg, queue_size=1)
+        self.obstacle_pub_ =  rospy.Publisher('/move_base_node_{}/TebLocalPlannerROS/obstacles'.format(self.agent_num), ObstacleArrayMsg, queue_size=1)
         self.create_robots()
 
         self.path = {}
@@ -613,28 +605,28 @@ class GazeborosEnv(gym.Env):
             angular_vel = twist.angular.z
             state["velocity"] = (linear_vel, angular_vel)
             robot.set_state(state)
-            # if robot.name == self.person.name:
-            #     obstacle_msg_array = ObstacleArrayMsg()
-            #     obstacle_msg_array.header.stamp = rospy.Time.now()
-            #     obstacle_msg_array.header.frame_id = "tb3_{}/odom".format(self.agent_num)
-            #     obstacle_msg = ObstacleMsg()
-            #     obstacle_msg.header = obstacle_msg_array.header
-            #     obstacle_msg.id = 0
-            #     for x in range (5):
-            #         for y in range (5):
-            #             point = Point32()
-            #             point.x = pos.position.x + (x-2)*0.1
-            #             point.y = pos.position.y + (y-2)*0.1
-            #             point.z = pos.position.z
-            #             obstacle_msg.polygon.points.append(point)
-            #     obstacle_msg.orientation.x = pos.orientation.x
-            #     obstacle_msg.orientation.y = pos.orientation.y
-            #     obstacle_msg.orientation.z = pos.orientation.z
-            #     obstacle_msg.orientation.w = pos.orientation.w
-            #     obstacle_msg.velocities.twist.linear.x = twist.linear.x
-            #     obstacle_msg.velocities.twist.angular.z = twist.linear.z
-            #     obstacle_msg_array.obstacles.append(obstacle_msg)
-            #     #self.obstacle_pub_.publish(obstacle_msg_array)
+            if self.use_movebase and robot.name == self.person.name:
+                obstacle_msg_array = ObstacleArrayMsg()
+                obstacle_msg_array.header.stamp = rospy.Time.now()
+                obstacle_msg_array.header.frame_id = "tb3_{}/odom".format(self.agent_num)
+                obstacle_msg = ObstacleMsg()
+                obstacle_msg.header = obstacle_msg_array.header
+                obstacle_msg.id = 0
+                for x in range (5):
+                    for y in range (5):
+                        point = Point32()
+                        point.x = pos.position.x + (x-2)*0.1
+                        point.y = pos.position.y + (y-2)*0.1
+                        point.z = pos.position.z
+                        obstacle_msg.polygon.points.append(point)
+                obstacle_msg.orientation.x = pos.orientation.x
+                obstacle_msg.orientation.y = pos.orientation.y
+                obstacle_msg.orientation.z = pos.orientation.z
+                obstacle_msg.orientation.w = pos.orientation.w
+                obstacle_msg.velocities.twist.linear.x = twist.linear.x
+                obstacle_msg.velocities.twist.angular.z = twist.linear.z
+                obstacle_msg_array.obstacles.append(obstacle_msg)
+                self.obstacle_pub_.publish(obstacle_msg_array)
 
     def create_robots(self):
 
@@ -704,10 +696,7 @@ class GazeborosEnv(gym.Env):
     def set_pos(self, name, pose):
         set_model_msg = ModelState()
         set_model_msg.model_name = name
-        if self.use_movebase:
-            self.prev_action = (0,0, 0)
-        else:
-            self.prev_action = (0,0)
+        self.prev_action = (0,0)
         quaternion_rotation = euler2quat(0, pose["orientation"], 0)
 
         set_model_msg.pose.orientation.x = quaternion_rotation[3]

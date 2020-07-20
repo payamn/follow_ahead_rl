@@ -17,11 +17,10 @@
   <arg name="config0_id" default="0"/>
 
 <!-- Spawn the robots. -->
-  <include file="$(find multi_jackal_base)/launch/jackal_base.launch">
+  <include file="$(find follow_ahead_rl)/launch/jackal_base.launch">
     <arg name="ns"            value="$(arg ns0)"/>
     <arg name="config"        value="$(arg config0)"/>
     <arg name="config_id"     value="$(arg config0_id)"/>
-    <arg name="use_move_base" value="false"/>
     <arg name="x"             value="2"/>
     <arg name="y"             value="-4"/>
     <arg name="yaw"           value="0.7"/>
@@ -43,6 +42,11 @@
 
     <node name="spawn_urdf" pkg="gazebo_ros" type="spawn_model" args="-urdf -model $(arg first_person) -x $(arg first_tb3_x_pos) -y 2 -z $(arg first_tb3_z_pos) -Y $(arg first_tb3_yaw) -param robot_description" />
   </group>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg first_person)"
+    args="0 0 0 0 0 0 1 map $(arg first_person)/odom"/>
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg first_tb3)"
+    args="0 0 0 0 0 0 1 map $(arg first_tb3)/odom"/>
 
 
 

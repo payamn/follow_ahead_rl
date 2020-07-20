@@ -47,40 +47,58 @@
   <arg name="config3_id" default="3"/>
 
   <!-- Spawn the robots. -->
-  <include file="$(find multi_jackal_base)/launch/jackal_base.launch">
+  <include file="$(find follow_ahead_rl)/launch/jackal_base.launch">
     <arg name="ns"            value="$(arg ns0)"/>
     <arg name="config"        value="$(arg config0)"/>
     <arg name="config_id"     value="$(arg config0_id)"/>
-    <arg name="use_move_base" value="false"/>
     <arg name="x"             value="2"/>
     <arg name="y"             value="-4"/>
     <arg name="yaw"           value="0.7"/>
   </include>
-  <include file="$(find multi_jackal_base)/launch/jackal_base.launch">
+  <include file="$(find follow_ahead_rl)/launch/jackal_base.launch">
     <arg name="ns"            value="$(arg ns1)"/>
     <arg name="config"        value="$(arg config1)"/>
     <arg name="config_id"     value="$(arg config1_id)"/>
-    <arg name="use_move_base" value="false"/>
     <arg name="x"             value="5"/>
   </include>
-  <include file="$(find multi_jackal_base)/launch/jackal_base.launch">
+  <include file="$(find follow_ahead_rl)/launch/jackal_base.launch">
     <arg name="ns"            value="$(arg ns2)"/>
     <arg name="config"        value="$(arg config2)"/>
     <arg name="config_id"     value="$(arg config2_id)"/>
-    <arg name="use_move_base" value="false"/>
     <arg name="x"             value="0"/>
     <arg name="y"             value="3"/>
     <arg name="yaw"           value="-1.57"/>
   </include>
-  <include file="$(find multi_jackal_base)/launch/jackal_base.launch">
+  <include file="$(find follow_ahead_rl)/launch/jackal_base.launch">
     <arg name="ns"            value="$(arg ns3)"/>
     <arg name="config"        value="$(arg config3)"/>
     <arg name="config_id"     value="$(arg config3_id)"/>
-    <arg name="use_move_base" value="false"/>
     <arg name="x"             value="2"/>
     <arg name="y"             value="3"/>
     <arg name="yaw"           value="-1.57"/>
   </include>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg first_person)"
+    args="0 0 0 0 0 0 1 map $(arg first_person)/odom"/>
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg first_tb3)"
+    args="0 0 0 0 0 0 1 map $(arg first_tb3)/odom"/>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg second_person)"
+    args="0 0 0 0 0 0 1 map $(arg second_person)/odom"/>
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg second_tb3)"
+    args="0 0 0 0 0 0 1 map $(arg second_tb3)/odom"/>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg third_person)"
+    args="0 0 0 0 0 0 1 map $(arg third_person)/odom"/>
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg third_tb3)"
+    args="0 0 0 0 0 0 1 map $(arg third_tb3)/odom"/>
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg fourth_person)"
+    args="0 0 0 0 0 0 1 map $(arg fourth_person)/odom"/>
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="static_map_odom_tf_$(arg fourth_tb3)"
+    args="0 0 0 0 0 0 1 map $(arg fourth_tb3)/odom"/>
+
+
 
   <!-- View in RVIZ. -->
   <group if="$(arg rviz)">
