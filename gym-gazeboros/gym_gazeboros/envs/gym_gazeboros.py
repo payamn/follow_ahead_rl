@@ -1157,7 +1157,7 @@ class GazeborosEnv(gym.Env):
     def add_arrow_observation_to_image(self, pos, orientation):
         color = self.colors_visualization[self.color_index]
         pos_image = GazeborosEnv.to_image_coordinate(pos, self.center_pos_)
-        pos_image2 = GazeborosEnv.to_image_coordinate((pos[0]+math.cos(orientation)*0.5, pos[1]+math.sin(orientation)*0.5), self.center_pos_)
+        pos_image2 = GazeborosEnv.to_image_coordinate((pos[0]+math.cos(orientation)*0.3, pos[1]+math.sin(orientation)*0.3), self.center_pos_)
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             rospy.logerr("problem with observation: {}".format(pos_image))
             return
