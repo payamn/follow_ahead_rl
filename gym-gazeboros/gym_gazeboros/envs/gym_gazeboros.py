@@ -489,6 +489,7 @@ class GazeborosEnv(gym.Env):
         self.is_use_test_setting = False
         self.use_predifined_mode_person = True
         self.mode_person = 0
+        self.use_noise = True
 
         self.use_goal = True
         self.robot_mode = 0
@@ -504,9 +505,8 @@ class GazeborosEnv(gym.Env):
 
         # being use for observation visualization
         self.center_pos_ = (0, 0)
-        self.robot_color = [255,0,0]
-        self.person_color = [0,0,255]
-        self.goal_color = [0,255,0]
+        self.colors_visualization = cv.cvtColor(cv.applyColorMap(np.arange(0, 255, dtype=np.uint8), cv.COLORMAP_WINTER), cv.COLOR_BGR2RGB).reshape(255,3).tolist()
+        self.color_index = 0
         self.first_call_observation = True
 
         self.test_simulation_ = False
@@ -592,18 +592,21 @@ class GazeborosEnv(gym.Env):
             if not found:
                 continue
             pos = states_msg.pose[model_idx]
-            state = {}
-            state["position"] = (pos.position.x, pos.position.y)
             euler = quat2euler(pos.orientation.x, pos.orientation.y, pos.orientation.z, pos.orientation.w)
+            orientation = euler[0]
             fall_angle = np.deg2rad(90)
             if abs(abs(euler[1]) - fall_angle)< 0.1 or abs(abs(euler[2]) - fall_angle)<0.1:
                 self.fallen = True
-            state["orientation"] = euler[0]
             # get velocity
             twist = states_msg.twist[model_idx]
             linear_vel = twist.linear.x
             angular_vel = twist.angular.z
+            pos_x = pos.position.x
+            pos_y = pos.position.y
+            state = {}
             state["velocity"] = (linear_vel, angular_vel)
+            state["position"] = (pos_x, pos_y)
+            state["orientation"] = orientation
             robot.set_state(state)
             if self.use_movebase and robot.name == self.person.name:
                 obstacle_msg_array = ObstacleArrayMsg()
@@ -668,6 +671,8 @@ class GazeborosEnv(gym.Env):
         else:
             idx_start = random.randint(0, len(self.path["points"]) - 20)
         self.current_path_idx = idx_start
+        if random.random() > 0.5:
+            self.path["points"].reverse()
 
         if self.is_evaluation_:
             init_pos_person = self.path["start_person"]
@@ -721,11 +726,9 @@ class GazeborosEnv(gym.Env):
 
         init_pos_robot, init_pos_person = self.get_init_pos_robot_person()
         self.center_pos_ = init_pos_person["pos"]
-        self.robot_color = [255,0,0]
-        self.person_color = [0,0,255]
+        self.color_index = 0
         self.fallen = False
         self.is_max_distance = False
-        self.goal_color = [0,255,0]
         self.first_call_observation = True
 
         self.current_obsevation_image_.fill(255)
@@ -952,7 +955,7 @@ class GazeborosEnv(gym.Env):
             elif self.use_predifined_mode_person:
                 mode_person = self.mode_person
             else:
-                mode_person = 0
+                mode_person = random.randint(0, 7)
                 #if self.agent_num == 2:
                 #    mode_person = random.randint(1, self.max_mod_person_)
                 #else:
@@ -1053,22 +1056,29 @@ class GazeborosEnv(gym.Env):
             if self.is_reseting:
                 return None
             time.sleep(0.001)
-        pos_his_robot = self.robot.pos_history.get_elemets()
+        pos_his_robot = np.asarray(self.robot.pos_history.get_elemets())
         heading_robot = self.robot.state_["orientation"]
 
-        pos_his_person = self.person.pos_history.get_elemets()
+        pos_his_person = np.asarray(self.person.pos_history.get_elemets())
         heading_person = self.person.state_["orientation"]
 
+        robot_vel = np.asarray(self.robot.get_velocity())
+        person_vel = np.asarray(self.person.get_velocity())
+        poses = np.concatenate((pos_his_robot, pos_his_person))
+        if self.use_noise:
+            poses += np.random.normal(loc=0, scale=0.2, size=poses.shape)
+            heading_robot += np.random.normal(loc=0, scale=0.3)
+            heading_person += np.random.normal(loc=0, scale=0.3)
+            robot_vel += np.random.normal(loc=0, scale=0.2, size=robot_vel.shape)
+            person_vel += np.random.normal(loc=0, scale=0.2, size=person_vel.shape)
         heading_relative = GazeborosEnv.wrap_pi_to_pi(heading_robot-heading_person)/(math.pi)
         pos_rel = []
-        for pos in (pos_his_robot+pos_his_person):
+        for pos in (poses):
             relative = GazeborosEnv.get_relative_position(pos, self.robot.relative)
             pos_rel.append(relative)
         pos_history = np.asarray(np.asarray(pos_rel)).flatten()/6.0
-        #heading_history = np.asarray(self.robot.get_relative_orientation())/math.pi
-        #orientation_position = np.append(pose_history, heading_history)
         #TODO: make the velocity normalization better
-        velocities = np.concatenate((self.person.get_velocity(), self.robot.get_velocity()))/self.robot.max_angular_vel
+        velocities = np.concatenate((person_vel, robot_vel))/self.robot.max_angular_vel
         velocities_heading = np.append(velocities, heading_relative)
         final_ob =  np.append(np.append(pos_history, velocities_heading), self.prev_action)
 
@@ -1119,7 +1129,8 @@ class GazeborosEnv(gym.Env):
     def to_image_coordinate(pos, center_pos):
         return (int((pos[0] - center_pos[0])*50+1000), int((pos[1] - center_pos[1])*50+1000))
 
-    def add_line_observation_to_image(self, pos, pos2, color):
+    def add_line_observation_to_image(self, pos, pos2):
+        color = self.colors_visualization[self.color_index]
         pos_image = GazeborosEnv.to_image_coordinate(pos, self.center_pos_)
         pos_image2 = GazeborosEnv.to_image_coordinate(pos2, self.center_pos_)
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
@@ -1127,13 +1138,30 @@ class GazeborosEnv(gym.Env):
             return
         self.new_obsevation_image_ = cv.line(self.new_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 1)
 
-    def add_arrow_observation_to_image(self, pos, orientation, color):
+    def add_triangle_observation_to_image(self, pos, orientation):
+        color = self.colors_visualization[self.color_index]
+        pos_image = GazeborosEnv.to_image_coordinate(pos, self.center_pos_)
+        pos_triangle1 = GazeborosEnv.to_image_coordinate((pos[0]+math.cos(orientation)*0.3, pos[1]+math.sin(orientation)*0.3), self.center_pos_)
+        pos_triangle2 = GazeborosEnv.to_image_coordinate((pos[0]+math.cos(orientation+math.pi/2)*0.1, pos[1]+math.sin(orientation+math.pi/2)*0.1), self.center_pos_)
+        pos_triangle3 = GazeborosEnv.to_image_coordinate((pos[0]+math.cos(orientation-math.pi/2)*0.1, pos[1]+math.sin(orientation-math.pi/2)*0.1), self.center_pos_)
+        poses = [pos_triangle1, pos_triangle2, pos_triangle3]
+        print(poses)
+
+        for pos in poses:
+            if pos[0] >2000 or pos[0] < 0 or pos[1] >2000 or pos[1] < 0:
+                rospy.logerr("problem with observation: {}".format(pos))
+                return
+        self.new_obsevation_image_ = cv.drawContours(self.new_obsevation_image_, [np.asarray(poses)], 0, color, -1)
+
+
+    def add_arrow_observation_to_image(self, pos, orientation):
+        color = self.colors_visualization[self.color_index]
         pos_image = GazeborosEnv.to_image_coordinate(pos, self.center_pos_)
         pos_image2 = GazeborosEnv.to_image_coordinate((pos[0]+math.cos(orientation)*0.5, pos[1]+math.sin(orientation)*0.5), self.center_pos_)
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             rospy.logerr("problem with observation: {}".format(pos_image))
             return
-        self.new_obsevation_image_ = cv.arrowedLine(self.new_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 3)
+        self.new_obsevation_image_ = cv.arrowedLine(self.new_obsevation_image_, (pos_image[0], pos_image[1]), (pos_image2[0], pos_image2[1]), color, 2, tipLength=0.5)
 
     def add_circle_observation_to_image(self, pos, color, radious, center_pos=None, image=None):
         if image is None:
@@ -1144,13 +1172,7 @@ class GazeborosEnv(gym.Env):
         if pos_image[0] >2000 or pos_image[0] < 0 or pos_image[1] >2000 or pos_image[1] < 0:
             rospy.logerr("problem with observation: {}".format(pos_image))
             return
-        return (cv.circle(image , (pos_image[0], pos_image[1]), radious, color, -1))
-
-    def darken_all_colors(self):
-        darken_fun = lambda x: [max(y-1, 100) for y in x]
-        self.robot_color = darken_fun(self.robot_color)
-        self.person_color = darken_fun(self.person_color)
-        self.goal_color = darken_fun(self.goal_color)
+        return (cv.circle(image , (pos_image[0], pos_image[1]), radious, color, 2))
 
     def get_supervised_action(self):
         while not self.person.is_current_state_ready() and not self.is_reseting:
@@ -1179,27 +1201,27 @@ class GazeborosEnv(gym.Env):
             rospy.logerr("person or robot orientation is None")
             return
         if self.first_call_observation:
-            self.new_obsevation_image_ = self.add_circle_observation_to_image(robot_pos, [152,100,100], 10)
-            self.new_obsevation_image_ = self.add_circle_observation_to_image(person_pos,[0,100,100], 10)
+            # self.new_obsevation_image_ = self.add_circle_observation_to_image(robot_pos, [152,100,100], 10)
+            # self.new_obsevation_image_ = self.add_circle_observation_to_image(person_pos,[0,100,100], 10)
             self.first_call_observation = False
         if self.is_collided():
             self.new_obsevation_image_ = self.add_circle_observation_to_image(robot_pos, [152,200,200], 10)
             self.new_obsevation_image_ = self.add_circle_observation_to_image(person_pos,[200,100,100], 10)
-        self.add_arrow_observation_to_image(robot_pos, robot_orientation, self.robot_color)
-        self.add_arrow_observation_to_image(person_pos, person_orientation, self.person_color)
+        self.add_arrow_observation_to_image(robot_pos, robot_orientation)
+        self.add_triangle_observation_to_image(person_pos, person_orientation)
 
         if self.use_goal:
             if self.use_movebase:
                 goal_orientation = current_goal["orientation"]
             else:
                 goal_orientation = robot_orientation
-            self.add_arrow_observation_to_image(current_goal["pos"], goal_orientation, self.goal_color)
-            self.add_line_observation_to_image(robot_pos, current_goal["pos"], self.person_color)
+            self.add_circle_observation_to_image(current_goal["pos"], self.colors_visualization[self.color_index], 5)
+            self.add_line_observation_to_image(robot_pos, current_goal["pos"])
         else:
-            self.add_line_observation_to_image(robot_pos, person_pos, self.person_color)
+            self.add_line_observation_to_image(robot_pos, person_pos)
         alpha = 0.50
         self.current_obsevation_image_ = cv.addWeighted(self.new_obsevation_image_, alpha, self.current_obsevation_image_, 1 - alpha, 0)
-        self.darken_all_colors()
+
 
 
     def get_current_observation_image(self):
@@ -1215,7 +1237,10 @@ class GazeborosEnv(gym.Env):
         self.robot.take_action(action)
         if self.wait_observation_ <= 0:
             self.update_observation_image()
-            self.wait_observation_ = 5
+            self.wait_observation_ = 7
+        self.color_index += 2
+        if self.color_index >= len(self.colors_visualization):
+            self.color_index = len(self.colors_visualization) - 1
         self.wait_observation_ -= 1
         return
 
