@@ -737,10 +737,10 @@ class GazeborosEnv(gym.Env):
         rospy.sleep(0.5)
         self.person.stop_robot()
         self.robot.stop_robot()
-        if self.use_movebase:
-            self.prev_action = (0,0, 0)
-        else:
-            self.prev_action = (0,0)
+        # if self.use_movebase:
+        #     self.prev_action = (0,0, 0)
+        # else:
+        self.prev_action = (0,0)
         self.set_pos(self.robot.name, init_pos_robot)
         self.set_pos(self.person.name, init_pos_person)
 
@@ -1183,7 +1183,8 @@ class GazeborosEnv(gym.Env):
         pos = self.person.calculate_ahead(2)
         pos_person = self.person.get_pos()
         pos_relative = GazeborosEnv.get_relative_position(pos, self.robot.relative)
-        pos_person_relative = GazeborosEnv.get_relative_position(pos_person, self.robot)
+        pos_person_relative = GazeborosEnv.get_relative_position(pos_person, self.robot.relative)
+        print (f"pos pos_person pos_relative [pos], [pos_person] [pos_relative]")
         pos_norm = GazeborosEnv.normalize(pos_relative, self.robot.max_rel_pos_range)
         orientation = GazeborosEnv.normalize(math.atan2(pos_relative[1] - pos_person_relative[1], pos_relative[0] - pos_person_relative[0]), math.pi)
         return np.asarray((pos_norm[0], pos_norm[1], orientation))
@@ -1233,7 +1234,7 @@ class GazeborosEnv(gym.Env):
 
 
     def take_action(self, action):
-        self.prev_action = action
+        self.prev_action = action[:2]
         self.robot.take_action(action)
         if self.wait_observation_ <= 0:
             self.update_observation_image()
