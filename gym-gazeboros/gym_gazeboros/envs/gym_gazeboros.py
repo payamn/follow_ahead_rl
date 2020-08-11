@@ -636,7 +636,7 @@ class GazeborosEnv(gym.Env):
         self.person = Robot('person_{}'.format(self.agent_num),
                             max_angular_speed=1, max_linear_speed=.6, agent_num=self.agent_num)
 
-        relative = None
+        relative = self.person
 
         if self.use_goal:
             relative = self.person
@@ -1327,15 +1327,17 @@ class GazeborosEnv(gym.Env):
         if distance < 0.5:
             reward = -1.3
         elif abs(distance - 2) < 0.5:
-            reward += 0.25 * (0.5 - abs(distance - 2))
+            reward += 0.5 * (0.5 - abs(distance - 2))
         elif distance >= 2.5:
             reward -= 0.25 * (distance - 2.5)
         elif distance < 1.5:
             reward -= (1.5 - distance)/1.5
         if abs(angle_robot_person) < 25:
-            reward += 0.3 * (25 - abs(angle_robot_person)) / 25
+            reward += 0.5 * (25 - abs(angle_robot_person)) / 25
         else:
             reward -= 0.25 * abs(angle_robot_person) / 180
+        if abs(distance - 2) < 0.5 and abs(angle_robot_person) < 25:
+            reward += 0.25
 
         # if not 90 > angle_robot_person > 0:
         #     reward -= distance/6.0
