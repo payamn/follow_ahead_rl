@@ -3,6 +3,8 @@
 from datetime import datetime
 
 import copy
+import traceback
+
 import os, subprocess, time, signal
 
 #from cv_bridge import CvBridge
@@ -337,8 +339,7 @@ class Robot():
                 self.stop_robot()
                 return
             if self.reset:
-                return
-            if self.reset:
+                self.stop_robot()
                 return
             angular_vel = 0
             linear_vel = 0
@@ -381,6 +382,7 @@ class Robot():
                     self.stop_robot()
                     return
                 if self.reset:
+                    self.stop_robot()
                     return
                 diff_angle, distance = self.angle_distance_to_point(self.goal["pos"])
                 if distance is None:
@@ -484,7 +486,7 @@ class GazeborosEnv(gym.Env):
         self.use_jackal = True
         self.lock = _thread.allocate_lock()
 
-        self.path_follower_test_settings = [0, 1, 2, 3, 4, 5, 6, 7]
+        self.path_follower_test_settings = {0:(0,70), 1:(2,30), 2:(3,40), 3:(7,10), 4:(7, 20), 5:(7, 30), 6:(7, 40), 7:(7, 50)}
         self.path_follower_current_setting_idx = 0
         self.is_use_test_setting = False
         self.use_predifined_mode_person = True
@@ -521,9 +523,9 @@ class GazeborosEnv(gym.Env):
         self.min_distance = 1
         self.max_distance = 2.5
         if self.test_simulation_ or self.is_evaluation_:
-           self.max_numb_steps = 640
+           self.max_numb_steps = 80
         else:
-            self.max_numb_steps = 100
+            self.max_numb_steps = 80
         self.reward_range = [-1, 1]
         self.reachabilit_value = None
         if self.use_reachability:
@@ -666,12 +668,14 @@ class GazeborosEnv(gym.Env):
             self.mode_person = 7
 
     def get_init_pos_robot_person(self):
-        if self.is_evaluation_ or self.is_use_test_setting:
+        if self.is_evaluation_:
             idx_start = 0
+        elif self.is_use_test_setting:
+            idx_start = self.path_follower_test_settings[self.path_follower_current_setting_idx][1]
         else:
             idx_start = random.randint(0, len(self.path["points"]) - 20)
         self.current_path_idx = idx_start
-        if random.random() > 0.5:
+        if not self.is_use_test_setting and random.random() > 0.5:
             self.path["points"].reverse()
 
         if self.is_evaluation_:
@@ -947,7 +951,7 @@ class GazeborosEnv(gym.Env):
             rospy.sleep(1.5)
             rospy.loginfo("path follower got the lock")
             if self.is_use_test_setting:
-                mode_person = self.path_follower_test_settings[self.path_follower_current_setting_idx]
+                mode_person = self.path_follower_test_settings[self.path_follower_current_setting_idx][0]
             elif self.test_simulation_:
                 mode_person = -1
             elif self.is_evaluation_:
@@ -1008,6 +1012,7 @@ class GazeborosEnv(gym.Env):
 
                 except Exception as e:
                     rospy.logerr("path follower {}, {}".format(self.is_reseting, e))
+                    traceback.print_exc()
                     break
                 if self.is_reseting:
                     self.person.stop_robot()
@@ -1293,13 +1298,14 @@ class GazeborosEnv(gym.Env):
         elif self.number_of_steps > self.max_numb_steps:
             self.update_observation_image()
             episode_over = True
-            rospy.loginfo('max number of steps episode over')
         if self.fallen:
             episode_over = True
             rospy.loginfo('fallen')
         reward = min(max(reward, -1), 1)
         if self.agent_num == 0:
             rospy.loginfo("action {} reward {}".format(action, reward))
+        if episode_over:
+            self.person.reset = True
         #reward += 1
         return ob, reward, episode_over, {}
 
