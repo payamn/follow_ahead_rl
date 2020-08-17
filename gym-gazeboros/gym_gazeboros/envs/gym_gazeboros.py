@@ -485,13 +485,16 @@ class GazeborosEnv(gym.Env):
         self.use_path = True
         self.use_jackal = True
         self.lock = _thread.allocate_lock()
-
-        self.path_follower_test_settings = {0:(0,70), 1:(2,30), 2:(3,40), 3:(7,10), 4:(7, 20), 5:(7, 30), 6:(7, 40), 7:(7, 50)}
+        self.path_follower_test_settings = {0:(0,0, "straight"), 1:(2,0, "right"), 2:(3,0, "left"),\
+                3:(0,40, "straight_hard"), 4:(2,40, "right_hard"), 5:(3,40, "left_hard"), 6:(7,0, "traj_1"),\
+                7:(7, 10, "traj_2"), 8:(7, 25, "traj_3"), 9:(7, 35, "traj_4"), 10:(7, 50, "traj_5")}
+        #self.path_follower_test_settings = {0:(7,25, "traj_3")}
         self.path_follower_current_setting_idx = 0
         self.is_use_test_setting = False
         self.use_predifined_mode_person = True
         self.mode_person = 0
         self.use_noise = True
+        self.use_reverse = True
 
         self.use_goal = True
         self.robot_mode = 0
@@ -534,7 +537,7 @@ class GazeborosEnv(gym.Env):
 
     def get_test_path_number(self):
         rospy.loginfo("current path idx: {}".format(self.path_follower_current_setting_idx))
-        return self.path_follower_current_setting_idx
+        return self.path_follower_test_settings[self.path_follower_current_setting_idx][2]
 
     def use_test_setting(self):
         self.is_use_test_setting = True
@@ -675,7 +678,7 @@ class GazeborosEnv(gym.Env):
         else:
             idx_start = random.randint(0, len(self.path["points"]) - 20)
         self.current_path_idx = idx_start
-        if not self.is_use_test_setting and random.random() > 0.5:
+        if not self.is_use_test_setting and self.use_reverse and random.random() > 0.5:
             self.path["points"].reverse()
 
         if self.is_evaluation_:
