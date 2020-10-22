@@ -184,7 +184,7 @@ class Robot():
     def movebase_client_goal(self, goal_pos, goal_orientation):
        # Creates a new goal with the MoveBaseGoal constructor
         move_base_goal = MoveBaseGoal()
-        move_base_goal.target_pose.header.frame_id = "world".format(self.agent_num)
+        move_base_goal.target_pose.header.frame_id = "tb3_{}/odom".format(self.agent_num)
         move_base_goal.target_pose.header.stamp = rospy.Time.now()
         move_base_goal.target_pose.pose.position.x = goal_pos[0]
         move_base_goal.target_pose.pose.position.y = goal_pos[1]
@@ -206,19 +206,19 @@ class Robot():
         # # Result of executing the action
         #     return self.action_client_.get_result()
 
-    def get_pos(self):
-        counter_problem = 0
-        while self.state_['position'] is None:
-            if self.reset:
-                return (None, None)
-            if counter_problem > 20:
-                rospy.logdebug("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
-            time.sleep(0.001)
-            counter_problem += 1
-            if counter_problem > 200:
-                raise Exception('Probable shared memory issue happend')
+        def get_pos(self):
+            counter_problem = 0
+            while self.state_['position'] is None:
+                if self.reset:
+                    return (None, None)
+                if counter_problem > 20:
+                    rospy.logdebug("waiting for pos to be available {}/{}".format(counter_problem/10, 20))
+                time.sleep(0.001)
+                counter_problem += 1
+                if counter_problem > 200:
+                    raise Exception('Probable shared memory issue happend')
 
-        return self.state_['position']
+            return self.state_['position']
 
 
 
