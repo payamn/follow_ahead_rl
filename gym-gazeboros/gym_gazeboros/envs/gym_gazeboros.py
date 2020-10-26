@@ -118,7 +118,7 @@ class History():
 
 
 class Robot():
-    def __init__(self, name, max_angular_speed=1, max_linear_speed=1, relative=None, agent_num=None, use_goal=False, use_movebase=False, use_jackal=False, window_size=10):
+    def __init__(self, name, max_angular_speed=1, max_linear_speed=1, relative=None, agent_num=None, use_goal=False, use_movebase=False, use_jackal=False, window_size=10, is_testing=False):
         self.name = name
         self.use_jackal = use_jackal
         self.init_node = False
@@ -127,6 +127,10 @@ class Robot():
         if relative is None:
             relative = self
         self.relative = relative
+        self.is_testing = is_testing
+        if self.is_testing:
+            self.all_pose_ = []
+            self.last_time_added = rospy.Time.now().to_sec()
         self.log_history = []
         self.agent_num = agent_num
         self.init_node = True
@@ -184,7 +188,7 @@ class Robot():
     def movebase_client_goal(self, goal_pos, goal_orientation):
        # Creates a new goal with the MoveBaseGoal constructor
         move_base_goal = MoveBaseGoal()
-        move_base_goal.target_pose.header.frame_id = "world".format(self.agent_num)
+        move_base_goal.target_pose.header.frame_id = "tb3_{}/odom".format(self.agent_num)
         move_base_goal.target_pose.header.stamp = rospy.Time.now()
         move_base_goal.target_pose.pose.position.x = goal_pos[0]
         move_base_goal.target_pose.pose.position.y = goal_pos[1]
@@ -259,6 +263,9 @@ class Robot():
         self.pos_history.add_element((init_pose["pos"][0],init_pose["pos"][1]))
         self.orientation_history.add_element(init_pose["orientation"])
         self.log_history = []
+        if self.is_testing:
+            self.all_pose_ = []
+
         #self.prev_call_gazeboros_ = None
         #self.is_collided = False
         self.is_pause = False
@@ -278,6 +285,9 @@ class Robot():
         self.orientation_history.add_element(state["orientation"])
         self.pos_history.add_element(state["position"])
         self.velocity_history.add_element(state["velocity"])
+        if self.is_testing and abs (rospy.Time.now().to_sec()- self.last_time_added) > 0.01:
+            self.all_pose_.append(self.state_.copy())
+            self.last_time_added = rospy.Time.now().to_sec()
 
 
     def get_velocity(self):
@@ -346,7 +356,8 @@ class Robot():
             if person_mode == 0:
                 linear_vel = self.max_linear_vel
             if person_mode == 1:
-                linear_vel = self.max_linear_vel * random.random()
+                #linear_vel = self.max_linear_vel * random.random()
+                linear_vel = self.max_linear_vel * 0.35
             elif person_mode == 2:
                 linear_vel = self.max_linear_vel/2
                 angular_vel = self.max_angular_vel/6
@@ -485,15 +496,18 @@ class GazeborosEnv(gym.Env):
         self.use_path = True
         self.use_jackal = True
         self.lock = _thread.allocate_lock()
-        self.path_follower_test_settings = {0:(0,49, "straight"), 1:(2,0, "right"), 2:(3,0, "left"),\
-                3:(0,40, "straight_hard"), 4:(2,40, "right_hard"), 5:(3,40, "left_hard"), 6:(7,0, "traj_1"),\
-                7:(7, 10, "traj_2"), 8:(7, 25, "traj_3"), 9:(7, 35, "traj_4"), 10:(7, 50, "traj_5")}
-        self.path_follower_test_settings = {0:(0,45, "straight_hard")}
+        self.path_follower_test_settings = {0:(0,0, "straight",False), 1:(2,0, "right", False), 2:(3,0, "left", False),\
+                3:(1,4, "straight_Behind", False), 4:(2,3, "right_behind", False), 5:(3,3, "left_behind", False), 6:(7,2, "traj_1", True, True),\
+                7:(7, 12, "traj_2", True, True), 8:(7, 43, "traj_3", True),\
+                9:(2,1, "right_left", False), 10:(2,2, "right_right", False),\
+                11:(3,1, "left_left", False), 12:(3,2, "left_right", False)\
+                }
+        #self.path_follower_test_settings = {0:(7, 43, "traj_3", True)#(7,2, "traj_1", True, True), 1:(7, 12, "traj_2", True, True)}
 
-        self.is_testing = False
+        self.is_testing = True
         self.small_window_size = False
         self.use_predifined_mode_person = True
-        self.use_goal = True
+        self.use_goal = False
         self.use_orientation_in_observation = True
 
 
@@ -505,6 +519,7 @@ class GazeborosEnv(gym.Env):
         self.use_reachability = False
 
         self.path_follower_current_setting_idx = 0
+        self.use_supervise_action = False
         self.mode_person = 0
         self.use_noise = True
         self.is_use_test_setting = False
@@ -549,6 +564,8 @@ class GazeborosEnv(gym.Env):
         self.max_distance = 2.5
         if self.test_simulation_ or self.is_evaluation_:
            self.max_numb_steps = 80
+        elif self.is_use_test_setting:
+           self.max_numb_steps = 100
         else:
             self.max_numb_steps = 80
         self.reward_range = [-1, 1]
@@ -661,14 +678,14 @@ class GazeborosEnv(gym.Env):
     def create_robots(self):
 
         self.person = Robot('person_{}'.format(self.agent_num),
-                            max_angular_speed=1, max_linear_speed=.6, agent_num=self.agent_num, window_size=self.window_size)
+                            max_angular_speed=1, max_linear_speed=.6, agent_num=self.agent_num, window_size=self.window_size, is_testing=self.is_testing)
 
         relative = self.person
 
         if self.use_goal:
             relative = self.person
         self.robot = Robot('tb3_{}'.format(self.agent_num),
-                            max_angular_speed=1.8, max_linear_speed=1.2, relative=relative, agent_num=self.agent_num, use_goal=self.use_goal, use_movebase=self.use_movebase ,use_jackal=self.use_jackal, window_size=self.window_size)
+                            max_angular_speed=1.8, max_linear_speed=1.2, relative=relative, agent_num=self.agent_num, use_goal=self.use_goal, use_movebase=self.use_movebase ,use_jackal=self.use_jackal, window_size=self.window_size, is_testing=self.is_testing)
 
     def find_random_point_in_circle(self, radious, min_distance, around_point):
         max_r = 2
@@ -711,6 +728,22 @@ class GazeborosEnv(gym.Env):
         if self.is_evaluation_:
             init_pos_person = self.path["start_person"]
             init_pos_robot = self.path["start_robot"]
+        elif self.is_use_test_setting and not self.path_follower_test_settings[self.path_follower_current_setting_idx][3]:
+            init_pos_person = {"pos": (0, 0), "orientation":0}
+            mode = self.path_follower_test_settings[self.path_follower_current_setting_idx][1]
+            if mode == 0:
+                orinetation_person_rob = 0
+            elif mode == 1:
+                orinetation_person_rob = -math.pi /4.
+            elif mode == 2:
+                orinetation_person_rob = math.pi /4.
+            elif mode == 3:
+                orinetation_person_rob = -math.pi
+            else:
+                orinetation_person_rob = math.pi/8*7
+            pos_robot = (1.5*math.cos(orinetation_person_rob), 1.5*math.sin(orinetation_person_rob))
+            init_pos_robot = {"pos": pos_robot, "orientation":0}
+
         elif not self.use_path:
             init_pos_person = {"pos": (0, 0), "orientation": random.random()*2*math.pi - math.pi}
             ahead_person = (init_pos_person['pos'][0] + math.cos(init_pos_person["orientation"]) * 2, init_pos_person['pos'][1] + math.sin(init_pos_person["orientation"]) * 2)
@@ -723,17 +756,23 @@ class GazeborosEnv(gym.Env):
                               "orientation": random.random()*2*math.pi - math.pi}#self.calculate_angle_using_path(idx_start)}
         else:
             init_pos_person = {"pos": self.path["points"][idx_start], "orientation": self.calculate_angle_using_path(idx_start)}
-            idx_robot = idx_start + 1
-            while (math.hypot(self.path["points"][idx_robot][1] - self.path["points"][idx_start][1],
-                              self.path["points"][idx_robot][0] - self.path["points"][idx_start][0]) < 1.6):
-                idx_robot += 1
+            if self.is_use_test_setting and len(self.path_follower_test_settings[self.path_follower_current_setting_idx])>4 and self.path_follower_test_settings[self.path_follower_current_setting_idx][4] :
+                orinetation_person_rob = math.pi/2.2
+                pos_robot = (self.path["points"][idx_start][0] + 2*math.cos(orinetation_person_rob+init_pos_person["orientation"]), self.path["points"][idx_start][1] + 2*math.sin(orinetation_person_rob+init_pos_person["orientation"]))
+                init_pos_robot = {"pos": pos_robot, "orientation":self.calculate_angle_using_path(idx_start+5)}
+            else:
 
-            init_pos_robot = {"pos": self.path["points"][idx_robot],\
-                              "orientation": self.calculate_angle_using_path(idx_robot)}
-            if not self.is_testing:
-                init_pos_robot["pos"] = (init_pos_robot["pos"][0]+ random.random()-0.5, \
-                        init_pos_robot["pos"][1]+ random.random()-0.5)
-                init_pos_robot["orientation"] = GazeborosEnv.wrap_pi_to_pi(init_pos_robot["orientation"] + random.random()-0.5)
+                idx_robot = idx_start + 1
+                while (math.hypot(self.path["points"][idx_robot][1] - self.path["points"][idx_start][1],
+                                  self.path["points"][idx_robot][0] - self.path["points"][idx_start][0]) < 1.6):
+                    idx_robot += 1
+
+                init_pos_robot = {"pos": self.path["points"][idx_robot],\
+                                  "orientation": self.calculate_angle_using_path(idx_robot)}
+                if not self.is_testing:
+                    init_pos_robot["pos"] = (init_pos_robot["pos"][0]+ random.random()-0.5, \
+                            init_pos_robot["pos"][1]+ random.random()-0.5)
+                    init_pos_robot["orientation"] = GazeborosEnv.wrap_pi_to_pi(init_pos_robot["orientation"] + random.random()-0.5)
 
         return init_pos_robot, init_pos_person
 
@@ -915,7 +954,6 @@ class GazeborosEnv(gym.Env):
         relative_pos = np.matmul(relative_pos, rotation_matrix)
         relative_pos2 = np.matmul(relative_pos2, rotation_matrix)
         angle_relative = np.arctan2(relative_pos2[1]-relative_pos[1], relative_pos2[0]-relative_pos[0])
-        relative_pos = (-relative_pos[1], -relative_pos[0])
         return -angle_relative, relative_pos
 
     @staticmethod
@@ -936,29 +974,6 @@ class GazeborosEnv(gym.Env):
         rotation_matrix = np.asarray([[np.cos(-center_orientation), np.sin(-center_orientation)], [-np.sin(-center_orientation), np.cos(-center_orientation)]])
         relative_pos = np.matmul(relative_pos, rotation_matrix)
         return relative_pos
-
-    @staticmethod
-    def get_relative_heading_position(relative, center):
-        while not relative.is_current_state_ready() or not center.is_current_state_ready():
-            if relative.reset:
-                rospy.loginfo("reseting so return none in rel pos rel: {} center".format(relative.is_current_state_ready(), center.is_current_state_ready()))
-                return (None, None)
-            time.sleep(0.01)
-            rospy.loginfo("waiting for observation to be ready heading position")
-        relative_orientation = relative.state_['orientation']
-        center_pos = np.asarray(center.state_['position'])
-        center_orientation = center.state_['orientation']
-
-        # transform the relative to center coordinat
-        relative_pos = np.asarray(relative.state_['position'] - center_pos)
-        relative_pos2 = np.asarray((relative_pos[0] +math.cos(relative_orientation) , relative_pos[1] + math.sin(relative_orientation)))
-        rotation_matrix = np.asarray([[np.cos(-center_orientation), np.sin(-center_orientation)], [-np.sin(-center_orientation), np.cos(-center_orientation)]])
-        relative_pos = np.matmul(relative_pos, rotation_matrix)
-        relative_pos2 = np.matmul(relative_pos2, rotation_matrix)
-        angle_relative = np.arctan2(relative_pos2[1]-relative_pos[1], relative_pos2[0]-relative_pos[0])
-        return angle_relative, relative_pos
-
-
 
 
     def set_robot_to_auto(self):
@@ -1223,7 +1238,8 @@ class GazeborosEnv(gym.Env):
         if self.is_reseting:
             return np.asarray([0,0])
 
-        pos = self.person.calculate_ahead(2)
+        self.use_supervise_action = True
+        pos = self.person.calculate_ahead(1.5)
         pos_person = self.person.get_pos()
         pos_relative = GazeborosEnv.get_relative_position(pos, self.robot.relative)
         pos_person_relative = GazeborosEnv.get_relative_position(pos_person, self.robot.relative)
@@ -1446,11 +1462,33 @@ class GazeborosEnv(gym.Env):
             rospy.sleep(2)
             return self.get_observation()
 
+    def save_current_path(self):
+        all_pos_robot = self.robot.all_pose_
+        all_pos_person = self.person.all_pose_
+        directory = "data/traj_simulations"
+        name = ""
+        if self.use_goal:
+            if self.use_supervise_action:
+                name += "base_"
+            else:
+                name += "planner_"
+        else:
+            name += "cmd_"
+        name += self.path_follower_test_settings[self.path_follower_current_setting_idx][2]
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+        with open(os.path.join(directory, name + ".pkl") , "wb") as f:
+            pickle.dump({"robot":all_pos_robot, "person":all_pos_person, "name":name}, f)
+        self.robot.all_pose_ = []
+        self.person.all_pose_ = []
+
     def next_setting(self):
+        self.save_current_path()
         self.path_follower_current_setting_idx += 1
 
     def is_finish(self):
         if self.path_follower_current_setting_idx >= len(self.path_follower_test_settings)-1:
+            self.save_current_path()
             return True
         return False
 
