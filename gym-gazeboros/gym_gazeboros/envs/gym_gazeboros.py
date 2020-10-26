@@ -929,7 +929,7 @@ class GazeborosEnv(gym.Env):
     @staticmethod
     def wrap_pi_to_pi(angle):
         while angle > math.pi:
-            angle -= math.pi
+            angle -= 2*math.pi
         while angle < - math.pi:
             angle += 2*math.pi
         return angle
@@ -1565,16 +1565,31 @@ def test():
     step = 0
     while (True):
         step +=1
-        action = gazeboros_env.get_supervised_action()
+        #action = gazeboros_env.get_supervised_action()
         #action = gazeboros_env.reachability_action()
-        gazeboros_env.step(action)
-        gazeboros_env.get_observation()
-        if step % 50==0:
-            print("reseting")
-            gazeboros_env.reset()
+        #gazeboros_env.step(action)
+        rel_person = GazeborosEnv.get_relative_heading_position(gazeboros_env.robot, gazeboros_env.person)[1]
+        relative_pos2 = GazeborosEnv.get_relative_position(gazeboros_env.robot.get_pos(), gazeboros_env.robot.relative)
+        orientation1 = np.rad2deg(np.arctan2(rel_person[1], rel_person[0]))
+        distance = math.hypot(relative_pos2[0], relative_pos2[1])
+
+        heading_robot = gazeboros_env.robot.state_["orientation"]
+        heading_person = gazeboros_env.person.state_["orientation"]
+        heading_relative = GazeborosEnv.wrap_pi_to_pi(heading_robot-heading_person)
+        orientation_heading = np.rad2deg(heading_relative)
+        #print (f"ob: {gazeboros_env.get_observation()}")
+        print (f"reward: {gazeboros_env.get_reward()}")
+        print (f"pos: {rel_person} vs {relative_pos2}")
+        print (f"orientation_h: {orientation_heading} dist: {distance} orin: {orientation1}")
+        print (f"orientation_robo: {np.rad2deg(heading_robot)} orintation pers: {np.rad2deg(heading_person)}")
+        print ("\n\n")
+
+        #if step % 50==0:
+        #    print("reseting")
+        #    gazeboros_env.reset()
 
         #gazeboros_env.visualize_observation()
-        rospy.sleep(0.05)
+        rospy.sleep(1)
 
 
 #test()
