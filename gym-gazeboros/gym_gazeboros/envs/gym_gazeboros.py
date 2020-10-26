@@ -313,12 +313,12 @@ class Robot():
                 #orientation = GazeborosEnv.denormalize(action[2], math.pi)
                 self.movebase_client_goal(pos_global, self.goal["orientation"])
         else:
-            linear_vel = max(min(action[0], self.max_linear_vel), -self.max_linear_vel)
-            angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
+            linear_vel = max(min(action[0]*self.max_linear_vel, self.max_linear_vel), -self.max_linear_vel)
+            angular_vel = max(min(action[1]*self.max_angular_vel, self.max_angular_vel), -self.max_angular_vel)
 
             cmd_vel = Twist()
-            cmd_vel.linear.x = float(self.current_vel_.linear.x -(self.current_vel_.linear.x - linear_vel)*0.9)
-            cmd_vel.angular.z = -float(self.current_vel_.angular.z - (self.current_vel_.angular.z - angular_vel)*0.9)
+            cmd_vel.linear.x = linear_vel #float(self.current_vel_.linear.x -(self.current_vel_.linear.x - linear_vel)*0.9)
+            cmd_vel.angular.z = angular_vel #-float(self.current_vel_.angular.z - (self.current_vel_.angular.z - angular_vel)*0.9)
             self.current_vel_ = cmd_vel
             self.cmd_vel_pub.publish(cmd_vel)
 
@@ -685,7 +685,7 @@ class GazeborosEnv(gym.Env):
         if self.use_goal:
             relative = self.person
         self.robot = Robot('tb3_{}'.format(self.agent_num),
-                            max_angular_speed=1.8, max_linear_speed=1.2, relative=relative, agent_num=self.agent_num, use_goal=self.use_goal, use_movebase=self.use_movebase ,use_jackal=self.use_jackal, window_size=self.window_size, is_testing=self.is_testing)
+                            max_angular_speed=1.8, max_linear_speed=0.8, relative=relative, agent_num=self.agent_num, use_goal=self.use_goal, use_movebase=self.use_movebase ,use_jackal=self.use_jackal, window_size=self.window_size, is_testing=self.is_testing)
 
     def find_random_point_in_circle(self, radious, min_distance, around_point):
         max_r = 2
