@@ -504,10 +504,10 @@ class GazeborosEnv(gym.Env):
                 }
         #self.path_follower_test_settings = {0:(7, 43, "traj_3", True)#(7,2, "traj_1", True, True), 1:(7, 12, "traj_2", True, True)}
 
-        self.is_testing = True
+        self.is_testing = False
         self.small_window_size = False
         self.use_predifined_mode_person = True
-        self.use_goal = False
+        self.use_goal = True
         self.use_orientation_in_observation = True
 
 
@@ -696,16 +696,15 @@ class GazeborosEnv(gym.Env):
         return (x, y)
 
     def set_mode_person_based_on_episode_number(self, episode_number):
-        episode_number=3001
         if episode_number < 500:
             self.mode_person = 0
-        elif episode_number < 1000:
+        elif episode_number < 510:
             self.mode_person = 1
-        elif episode_number < 1500:
+        elif episode_number < 700:
             self.mode_person = 3
-        elif episode_number < 2500:
+        elif episode_number < 900:
             self.mode_person = 5
-        elif episode_number < 3000:
+        elif episode_number < 1000:
             self.mode_person = 6
         else:
             #self.mode_person = 7
