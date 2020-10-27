@@ -1287,7 +1287,8 @@ class GazeborosEnv(gym.Env):
 
         image = self.current_obsevation_image_
         image = image/255.
-
+        if self.is_testing:
+            self.save_current_path()
         return image
 
 
@@ -1482,12 +1483,10 @@ class GazeborosEnv(gym.Env):
         self.person.all_pose_ = []
 
     def next_setting(self):
-        self.save_current_path()
         self.path_follower_current_setting_idx += 1
 
     def is_finish(self):
         if self.path_follower_current_setting_idx >= len(self.path_follower_test_settings)-1:
-            self.save_current_path()
             return True
         return False
 
