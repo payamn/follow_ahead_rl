@@ -331,15 +331,14 @@ class Robot():
                 #orientation = ViconEnv.denormalize(action[2], math.pi)
                 self.movebase_client_goal(pos_global, self.goal["orientation"])
         else:
-            angular_vel = max(min(action[1], self.max_angular_vel), -self.max_angular_vel)
-            linear_vel = max(min(action[0], self.max_linear_vel), -self.max_linear_vel)
-            if (abs(angular_vel)>1 and abs(linear_vel)>0.4):
-              linear_vel *= 0.6
-              angular_vel *= 0.6
+            angular_vel = max(min(action[1]*self.max_angular_vel, self.max_angular_vel), -self.max_angular_vel)
+            linear_vel = max(min(action[0]*self.max_linear_vel, self.max_linear_vel), -self.max_linear_vel)
+            #if (abs(angular_vel)>1 and abs(linear_vel)>0.4):
+            #  linear_vel *= 0.6
 
             cmd_vel = Twist()
-            cmd_vel.linear.x = float(self.current_vel_.linear.x -(self.current_vel_.linear.x - linear_vel)*0.9)
-            cmd_vel.angular.z = float(self.current_vel_.angular.z - (self.current_vel_.angular.z - angular_vel)*0.9)
+            cmd_vel.linear.x = linear_vel#float(self.current_vel_.linear.x -(self.current_vel_.linear.x - linear_vel)*0.9)
+            cmd_vel.angular.z = -angular_vel#-float(self.current_vel_.angular.z - (self.current_vel_.angular.z - angular_vel)*0.9)
             self.current_vel_ = cmd_vel
             self.cmd_vel_pub.publish(cmd_vel)
 
@@ -443,7 +442,7 @@ class ViconEnv(gym.Env):
         self.is_reseting = True
         self.lock = _thread.allocate_lock()
         self.robot_mode = 0
-        self.use_goal = False
+        self.use_goal = True
         self.use_movebase = True
         self.is_use_test_setting = False
 
@@ -489,14 +488,14 @@ class ViconEnv(gym.Env):
     def create_robots(self):
 
         self.person = Robot('person',
-                            max_angular_speed=0.25, max_linear_speed=.25)
+                            max_angular_speed=1, max_linear_speed=.6)
 
 
         relative = self.person
         if self.use_goal:
           relative = self.person
         self.robot = Robot('robot',
-                            max_angular_speed=2.0, max_linear_speed=0.8, relative=relative, use_goal=self.use_goal, use_movebase=self.use_movebase)
+                            max_angular_speed=1.8, max_linear_speed=0.8, relative=relative, use_goal=self.use_goal, use_movebase=self.use_movebase)
 
     def get_supervised_action(self):
         while not self.person.is_current_state_ready() and not self.is_reseting:
@@ -644,7 +643,6 @@ class ViconEnv(gym.Env):
         relative_pos = np.matmul(relative_pos, rotation_matrix)
         relative_pos2 = np.matmul(relative_pos2, rotation_matrix)
         angle_relative = np.arctan2(relative_pos2[1]-relative_pos[1], relative_pos2[0]-relative_pos[0])
-        relative_pos = (-relative_pos[1], -relative_pos[0])
         return -angle_relative, relative_pos
 
     def set_robot_to_auto(self):
@@ -780,27 +778,6 @@ class ViconEnv(gym.Env):
 
         return final_ob
 
-    @staticmethod
-    def get_relative_heading_position(relative, center):
-        while not relative.is_current_state_ready() or not center.is_current_state_ready():
-            if relative.reset:
-                rospy.logwarn("reseting so return none in rel pos rel: {} center".format(relative.is_current_state_ready(), center.is_current_state_ready()))
-                return (None, None)
-            time.sleep(0.1)
-            rospy.loginfo ("waiting for observation to be ready heading pos")
-        relative_orientation = relative.state_['orientation']
-        center_pos = np.asarray(center.state_['position'])
-        center_orientation = center.state_['orientation']
-
-        # transform the relative to center coordinat
-        relative_pos = np.asarray(relative.state_['position'] - center_pos)
-        relative_pos2 = np.asarray((relative_pos[0] +math.cos(relative_orientation) , relative_pos[1] + math.sin(relative_orientation)))
-        rotation_matrix = np.asarray([[np.cos(-center_orientation), np.sin(-center_orientation)], [-np.sin(-center_orientation), np.cos(-center_orientation)]])
-        relative_pos = np.matmul(relative_pos, rotation_matrix)
-        relative_pos2 = np.matmul(relative_pos2, rotation_matrix)
-        angle_relative = np.arctan2(relative_pos2[1]-relative_pos[1], relative_pos2[0]-relative_pos[0])
-        relative_pos = (-relative_pos[1], -relative_pos[0])
-        return -angle_relative, relative_pos
 
     @staticmethod
     def get_relative_position(pos, center):
@@ -983,7 +960,7 @@ class ViconEnv(gym.Env):
         try:
           self.number_of_steps += 1
           self.take_action(action)
-          rospy.sleep(0.05)
+          rospy.sleep(0.1)
           reward = self.get_reward()
           ob = self.get_observation()
           episode_over = False
