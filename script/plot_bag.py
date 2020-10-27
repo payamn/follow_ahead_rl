@@ -71,7 +71,11 @@ class Robot():
         rospy.Subscriber("/vicon/Person/Person", TransformStamped, self.vicon_cb)
 
   def get_pos(self, idx):
-    return self.all_states_[idx]["position"]
+    if "position" in self.all_states_[idx].keys():
+      pos = self.all_states_[idx]["position"]
+    else:
+      pos = self.all_states_[idx]["pos"]
+    return pos
   
   def get_orientation(self, idx):
     return self.all_states_[idx]["orientation"]
@@ -89,14 +93,30 @@ class Robot():
 
   def get_relative_position(self, center, idx):
     relative_orientation = self.all_states_[idx]['orientation']
-    center_pos = np.asarray(center.all_states_[idx]['position'])
+    center_pos = np.asarray(center.get_pos(idx))
     center_orientation = center.all_states_[idx]['orientation']
 
     # transform the pos to center coordinat
-    relative_pos = np.asarray(self.all_states_[idx]['position'] - center_pos)
+    relative_pos = np.asarray(self.get_pos(idx) - center_pos)
     rotation_matrix = np.asarray([[np.cos(-center_orientation), np.sin(-center_orientation)], [-np.sin(-center_orientation), np.cos(-center_orientation)]])
     relative_pos = np.matmul(relative_pos, rotation_matrix)
+
     return relative_pos
+
+  def get_relative_heading_position(self, center, idx):
+    relative_orientation = self.all_states_[idx]['orientation']
+    center_pos = np.asarray(center.get_pos(idx))
+    center_orientation = center.all_states_[idx]['orientation']
+    print (np.rad2deg(relative_orientation - center_orientation))
+
+    # transform the relative to center coordinat
+    relative_pos = np.asarray(self.get_pos(idx) - center_pos)
+    relative_pos2 = np.asarray((relative_pos[0] +math.cos(relative_orientation) , relative_pos[1] + math.sin(relative_orientation)))
+    rotation_matrix = np.asarray([[np.cos(-center_orientation), np.sin(-center_orientation)], [-np.sin(-center_orientation), np.cos(-center_orientation)]])
+    relative_pos = np.matmul(relative_pos, rotation_matrix)
+    relative_pos2 = np.matmul(relative_pos2, rotation_matrix)
+    angle_relative = np.arctan2(relative_pos2[1]-relative_pos[1], relative_pos2[0]-relative_pos[0])
+    return angle_relative, relative_pos
 
   def is_bag_finish(self):
     if self.last_time_observation is not None and abs(rospy.Time.now().to_sec() - self.last_time_observation) > 1:
@@ -133,7 +153,6 @@ class Results():
       pos_triangle2 = utils.to_image_coordinate((pos[0]+math.cos(orientation+math.pi/2)*0.1, pos[1]+math.sin(orientation+math.pi/2)*0.1), self.center_pos_)
       pos_triangle3 = utils.to_image_coordinate((pos[0]+math.cos(orientation-math.pi/2)*0.1, pos[1]+math.sin(orientation-math.pi/2)*0.1), self.center_pos_)
       poses = [pos_triangle1, pos_triangle2, pos_triangle3]
-      print(poses)
 
       for pos in poses:
           if pos[0] >self.current_obsevation_image_.shape[0] or pos[0] < 0 or pos[1] >self.current_obsevation_image_.shape[1] or pos[1] < 0:
@@ -217,10 +236,10 @@ class Results():
       reward = -1.3
     elif abs(distance - self.DESIRE_DISTANCE) < 0.5:
       reward += 0.5 * (0.5 - abs(distance - self.DESIRE_DISTANCE))
-    elif distance >= 2.5:
+    elif distance >= self.DESIRE_DISTANCE + 0.5:
       reward -= 0.25 * (distance - self.DESIRE_DISTANCE + 0.5)
     elif distance < self.DESIRE_DISTANCE - 0.5:
-      reward -= self.DESIRE_DISTANCE - 0.5 - distance
+      reward -= (self.DESIRE_DISTANCE - 0.5 - distance)/(self.DESIRE_DISTANCE - 0.5)
     if abs(angle_robot_person) < 25:
       reward += 0.5 * (25 - abs(angle_robot_person)) / 25
     else:
@@ -236,12 +255,16 @@ class Results():
     with open (name+"_.pkl", "wb") as f:
       pickle.dump(dic_data, f)
 
-  def load(self, file_address):
+  def load(self, file_address, use_sim=False):
     with open(file_address, "rb") as f:
       dic_data = pickle.load(f)
+      
     self.name = dic_data["name"]
-    self.person.all_states_ = dic_data["person"].copy()
-    self.robot.all_states_ = dic_data["robot"].copy()
+    self.person.all_states_ = dic_data["person"][-12:].copy()
+    self.robot.all_states_ = dic_data["robot"][-12:].copy()
+    if use_sim:
+      self.person.all_states_ = [ self.person.all_states_[idx*10] for idx in range (len(self.person.all_states_)//10)] 
+      self.robot.all_states_ = [ self.robot.all_states_[idx*10] for idx in range (len(self.robot.all_states_)//10)] 
 
   def wait_until_bag_finish(self):
     while not self.robot.is_bag_finish() or not self.person.is_bag_finish():
@@ -253,9 +276,14 @@ class Results():
     print (self.robot.all_states_)
     print (self.person.all_states_)
 
+  def calculate_orientation_dif(self, idx):
+    ori_rel, pos_rel = self.robot.get_relative_heading_position(self.person, idx)
+    return ori_rel
+
   def get_metrics(self):
     rewards = []
     orientations = []
+    orientation_dif = []
     distances = []
     len_data = min(len(self.robot.all_states_), len(self.person.all_states_))
     for idx in range (len_data):
@@ -264,6 +292,8 @@ class Results():
       rewards.append(self.get_reward(idx))
       distances.append(self.get_dist_person_robot(idx))
       orientations.append(self.get_angle_person_robot(idx))
+      orientation_dif.append(self.calculate_orientation_dif(idx))
+
     mean_orientation = np.mean(orientations)
     sum_orientations_m = 0
     for orientation in orientations:
@@ -273,7 +303,8 @@ class Results():
 
       
     return {"name":self.name, "orientation_mean":np.average(orientations), "orientation_std":std, \
-            "reward":np.sum(rewards), "distance":np.average(distances), "distance_std":np.std(distances)}
+            "reward":np.sum(rewards), "distance":np.average(distances), "distance_std":np.std(distances),\
+            "ori_dif":np.average(orientation_dif)}
 
 
   def plot_calculate_metrics(self):
@@ -282,21 +313,22 @@ class Results():
     distances = []
     len_data = min(len(self.robot.all_states_), len(self.person.all_states_))
     for idx in range (len_data):
-      if idx % 10==0:
+      if idx % 3==0:
         self.update_observation_image(idx)
       rewards.append(self.get_reward(idx))
       distances.append(self.get_dist_person_robot(idx))
       orientations.append(self.get_angle_person_robot(idx))
+    print (np.rad2deg(self.robot.get_relative_heading_position(self.person, 0)[0]))
 
     img = self.get_current_observation_image()
     img = cv.cvtColor(img, cv.COLOR_RGB2BGR)
-    print(f"\n\ndist avg: {np.average(distances)} orientation avg: {np.average(orientations)} reward: {np.sum(rewards)} reward avg: {np.average(rewards)}")
+    print(f"\n\ndist avg: {np.average(distances)} orientation avg: {np.rad2deg(np.average(orientations))},  reward: {np.sum(rewards)} reward avg: {np.average(rewards)}")
     cv.imshow("image", img)
     cv.waitKey(0)
 
 
 
-def plot_all_results( results):
+def plot_all_results( results, is_sim=False):
   
   name = []
   orientations = []
@@ -312,8 +344,11 @@ def plot_all_results( results):
     distances_std.append(met["distance_std"])
     orientations.append(np.rad2deg(met["orientation_mean"]))
     orientations_std.append(np.rad2deg(met["orientation_std"]))
-    #print (f"{name[-1]}: Distance_avg: {distances[-1]:.2f} Distance_std: {distances_std[-1]:.2f} Orientation_avg: {orientations[-1]:.1f} Orientation_std: {orientations_std[-1]:.1f} reward: {rewards[-1]:.2f}")
-    print (f"{name[-1]}: ${distances[-1]:.2f}\pm{distances_std[-1]:.1f}$ & ${orientations[-1]:.1f}\pm{orientations_std[-1]:.1f}$ & ${rewards[-1]:.2f}$")
+    print (f"{name[-1]}: Distance_avg: {distances[-1]:.2f} Distance_std: {distances_std[-1]:.2f} Orientation_avg: {orientations[-1]:.1f} Orientation_std: {orientations_std[-1]:.1f} reward: {rewards[-1]:.2f} ori_dif: {np.rad2deg(met['ori_dif']):0.2f}")
+    if is_sim:
+      print (f"{name[-1]}: ${distances[-1]:.2f}\pm{distances_std[-1]:.1f}$ & ${orientations[-1]:.1f}\pm{orientations_std[-1]:.1f}$ & ${rewards[-1]:.2f}$")
+    else:
+      print (f"{name[-1]}: ${distances[-1]:.2f}\pm{distances_std[-1]:.1f}$ & ${orientations[-1]:.1f}\pm{orientations_std[-1]:.1f}$ & ${rewards[-1]:.2f}$")
     print ("\n")
     
   #df = pd.DataFrame({'name': name, 'assess':[x for x in range(len(name))]})
@@ -330,6 +365,7 @@ if __name__== "__main__":
   parser.add_argument('--load-file', action='store_true')
   parser.add_argument('--load-folder', action='store_true')
   parser.add_argument('--plot', action='store_true')
+  parser.add_argument('--use-sim-data', action='store_true')
   parser.add_argument('--from-bag', action='store_true')
   args = parser.parse_args()
 
@@ -343,7 +379,7 @@ if __name__== "__main__":
       result = Results() 
       result.load(pkl_name)
       name_list = result.name.split("_")
-      if name_list[-1] != "planner" and name_list[-1] != "line":
+      if not args.use_sim_data and name_list[-1] != "planner" and name_list[-1] != "line":
         print ("error ")
         continue
         new_name = f"{name_list[-1]}_{name_list[-2]}_base_line"
@@ -351,7 +387,7 @@ if __name__== "__main__":
         result.save(new_name)
 
       all_results.append(result)
-    plot_all_results(all_results) 
+    plot_all_results(all_results, args.use_sim_data) 
     #plt.show()
 
       
@@ -363,7 +399,7 @@ if __name__== "__main__":
       if args.from_bag:
         result.wait_until_bag_finish()
       else:
-        result.load(args.file_name)
+        result.load(args.file_name, args.use_sim_data)
     else:
       print("exiting you need to load or read from bag file")
       exit(0)
