@@ -76,7 +76,7 @@ class Robot():
     else:
       pos = self.all_states_[idx]["pos"]
     return pos
-  
+
   def get_orientation(self, idx):
     return self.all_states_[idx]["orientation"]
 
@@ -184,7 +184,7 @@ class Results():
 
 
 
-  def update_observation_image(self, idx):
+  def update_observation_image(self, idx, len_data):
       self.new_obsevation_image_ = np.copy(self.current_obsevation_image_)
       robot_pos = self.robot.get_pos(idx)
       robot_orientation = self.robot.get_orientation(idx)
@@ -203,7 +203,7 @@ class Results():
       # self.add_line_observation_to_image(robot_pos, person_pos)
       alpha = 0.50
       self.current_obsevation_image_ = cv.addWeighted(self.new_obsevation_image_, alpha, self.current_obsevation_image_, 1 - alpha, 0)
-      self.color_index += 4
+      self.color_index += 255//len_data
 
 
   def get_current_observation_image(self):
@@ -222,7 +222,7 @@ class Results():
   def get_dist_person_robot(self, idx):
     pos_rel = self.robot.get_relative_position(self.person, idx)
     return math.hypot(pos_rel[0], pos_rel[1])
-  
+
   def get_reward(self, idx):
     reward = 0
     pos_rel = self.robot.get_relative_position(self.person, idx)
@@ -258,13 +258,13 @@ class Results():
   def load(self, file_address, use_sim=False):
     with open(file_address, "rb") as f:
       dic_data = pickle.load(f)
-      
+
     self.name = dic_data["name"]
-    self.person.all_states_ = dic_data["person"][-12:].copy()
-    self.robot.all_states_ = dic_data["robot"][-12:].copy()
+    self.person.all_states_ = dic_data["person"][4:].copy()
+    self.robot.all_states_ = dic_data["robot"][4:].copy()
     if use_sim:
-      self.person.all_states_ = [ self.person.all_states_[idx*10] for idx in range (len(self.person.all_states_)//10)] 
-      self.robot.all_states_ = [ self.robot.all_states_[idx*10] for idx in range (len(self.robot.all_states_)//10)] 
+      self.person.all_states_ = [ self.person.all_states_[idx*10] for idx in range (len(self.person.all_states_)//10)]
+      self.robot.all_states_ = [ self.robot.all_states_[idx*10] for idx in range (len(self.robot.all_states_)//10)]
 
   def wait_until_bag_finish(self):
     while not self.robot.is_bag_finish() or not self.person.is_bag_finish():
@@ -301,7 +301,7 @@ class Results():
     sum_orientations_m /= len(orientations)
     std = np.sqrt(sum_orientations_m)
 
-      
+
     return {"name":self.name, "orientation_mean":np.average(orientations), "orientation_std":std, \
             "reward":np.sum(rewards), "distance":np.average(distances), "distance_std":np.std(distances),\
             "ori_dif":np.average(orientation_dif)}
@@ -314,7 +314,7 @@ class Results():
     len_data = min(len(self.robot.all_states_), len(self.person.all_states_))
     for idx in range (len_data):
       if idx % 3==0:
-        self.update_observation_image(idx)
+        self.update_observation_image(idx, len_data//3)
       rewards.append(self.get_reward(idx))
       distances.append(self.get_dist_person_robot(idx))
       orientations.append(self.get_angle_person_robot(idx))
@@ -329,7 +329,7 @@ class Results():
 
 
 def plot_all_results( results, is_sim=False):
-  
+
   name = []
   orientations = []
   rewards = []
@@ -350,7 +350,7 @@ def plot_all_results( results, is_sim=False):
     else:
       print (f"{name[-1]}: ${distances[-1]:.2f}\pm{distances_std[-1]:.1f}$ & ${orientations[-1]:.1f}\pm{orientations_std[-1]:.1f}$ & ${rewards[-1]:.2f}$")
     print ("\n")
-    
+
   #df = pd.DataFrame({'name': name, 'assess':[x for x in range(len(name))]})
 
   #plt.errorbar(range(len(df['name'])), orientations, orientations_std,  fmt='o')
@@ -376,7 +376,7 @@ if __name__== "__main__":
 
     all_results = []
     for pkl_name in onlyfiles:
-      result = Results() 
+      result = Results()
       result.load(pkl_name)
       name_list = result.name.split("_")
       if not args.use_sim_data and name_list[-1] != "planner" and name_list[-1] != "line":
@@ -387,10 +387,10 @@ if __name__== "__main__":
         result.save(new_name)
 
       all_results.append(result)
-    plot_all_results(all_results, args.use_sim_data) 
+    plot_all_results(all_results, args.use_sim_data)
     #plt.show()
 
-      
+
 
 
   else:
