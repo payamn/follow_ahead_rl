@@ -1,0 +1,6 @@
+This is the git repo for LBGP: Learning Based Goal Planning for Autonomous Following in Front.
+We created a docker for this project that can be used for any gazebo gym project.
+First follow this tutorial to install docker with GPU https://cnvrg.io/how-to-setup-docker-and-nvidia-docker-2-0-on-ubuntu-18-04/
+Then first run "bash docker/run_script.bash"
+If you want to run this docker again you can use "bash docker/exec_script.bash"
+
