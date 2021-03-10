@@ -173,7 +173,7 @@ tf2-py==0.6.5
 tf2-ros==0.6.5
 topic-tools==1.14.10
 trollius==2.0.1
-Twisted==17.9.0
+Twisted==20.3.0
 txaio==2.8.1
 u-msgpack-python==2.1
 urdfdom-py==0.4.5
