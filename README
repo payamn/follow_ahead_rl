@@ -1,6 +1,36 @@
 This is the git repo for LBGP: Learning Based Goal Planning for Autonomous Following in Front.
 We created a docker for this project that can be used for any gazebo gym project.
-First follow this tutorial to install docker with GPU https://cnvrg.io/how-to-setup-docker-and-nvidia-docker-2-0-on-ubuntu-18-04/
+First follow this tutorial to install docker with GPU:
+```
+https://cnvrg.io/how-to-setup-docker-and-nvidia-docker-2-0-on-ubuntu-18-04/
+```
+
 Then first run "bash docker/run_script.bash"
 If you want to run this docker again you can use "bash docker/exec_script.bash"
 
+To Run without docker:
+```
+Install ROS Melodic with Gazebo 9.16
+```
+test:
+```
+gazebo --version
+
+```
+Now create catkin_ws and get multi_jackal
+You need to check and install the requirements of https://github.com/NicksSimulationsROS/multi_jackal
+```
+sudo apt install python-catkin-tools 
+cd ~/
+mkdir -p catkin_ws/src
+cd catkin_ws/src/
+git clone https://github.com/payamn/follow_ahead_rl.git
+git clone https://github.com/NicksSimulationsROS/multi_jackal 
+cd ..
+catkin build
+cd ~/catkin_ws/src/follow_ahead_rl/
+pip install gym-gazeboros
+pip install -r requirements.txt
+echo "export PYTHONPATH=$PYTHONPATH:$HOME/catkin_ws/src/follow_ahead_rl/gym-gazeboros" >> ~/.bashrc
+source ~/.bashrc
+```
