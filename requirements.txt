@@ -65,7 +65,7 @@ nose==1.3.7
 numpy==1.13.3
 osrf-pycommon==0.1.9
 paramiko==2.0.0
-Pillow==5.1.0
+Pillow==8.2.0
 psutil==5.4.2
 py-ubjson==0.8.5
 pyasn1==0.4.2
